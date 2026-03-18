@@ -1,0 +1,411 @@
+/* ── Top Bar ── */
+.top-bar {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+
+.top-bar h1 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--accent);
+  margin: 0;
+}
+
+.top-bar .date {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ── Bucket Tabs ── */
+.bucket-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.bucket-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.bucket-tab {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.bucket-tab.active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* ── Task List ── */
+.task-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0 100px;
+}
+
+.task-list-empty {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ── Task Card ── */
+.task-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s ease;
+}
+
+.task-card:active {
+  background: var(--surface-hover);
+}
+
+.task-card.completed {
+  opacity: 0.45;
+}
+
+.task-checkbox {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.task-checkbox:hover {
+  border-color: var(--accent);
+}
+
+.task-card.completed .task-checkbox {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.task-checkbox .check-icon {
+  display: none;
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-card.completed .task-checkbox .check-icon {
+  display: block;
+}
+
+.task-card.critical .task-checkbox {
+  border-color: var(--red);
+}
+
+.task-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-text {
+  font-size: 15px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.task-card.completed .task-text {
+  text-decoration: line-through;
+}
+
+.task-card.critical .task-text,
+.task-card.must-do-today .task-text {
+  color: var(--red);
+}
+
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.task-bucket {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.task-priority {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.task-priority.critical {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+.task-priority.high {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.task-priority.low {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.task-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Bottom Input Bar ── */
+.input-bar {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  z-index: 20;
+}
+
+.input-bar input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 15px;
+  color: var(--text);
+}
+
+.input-bar input::placeholder {
+  color: var(--text-muted);
+}
+
+.input-bar input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Mic Button ── */
+.mic-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--surface-hover, #1a1d24);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  border: 2px solid transparent;
+}
+
+.mic-btn:active,
+.mic-btn.recording {
+  background: var(--red);
+  color: var(--bg);
+  border-color: var(--red);
+  animation: micPulse 0.8s infinite;
+}
+
+.mic-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  animation: none;
+}
+
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.send-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.whats-left-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.15s ease;
+}
+
+.modal {
+  background: var(--surface);
+  border-radius: 16px 16px 0 0;
+  width: 100%;
+  max-width: 480px;
+  max-height: 70dvh;
+  overflow-y: auto;
+  padding: 24px 20px;
+  animation: slideUp 0.2s ease;
+}
+
+.modal h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+
+.modal p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.modal-close {
+  margin-top: 20px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* ── Loading ── */
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.sending-indicator {
+  font-size: 12px;
+  color: var(--accent);
+  text-align: center;
+  padding: 8px;
+  animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* ── Voice Status ── */
+.voice-status {
+  position: fixed;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--red);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 20;
+  animation: pulse 1.2s infinite;
+}
+
+/* ── Mic Error ── */
+.mic-error {
+  position: fixed;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border-top: 1px solid rgba(251, 191, 36, 0.2);
+  z-index: 20;
+  cursor: pointer;
+}
