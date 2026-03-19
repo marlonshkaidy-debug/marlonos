@@ -53,8 +53,25 @@ When the user says a time WITHOUT AM/PM: default to PM for times 1:00–7:59 (e.
 Auto-assign each task to the most appropriate bucket based on context.
 Parse date references into dueDate (YYYY-MM-DD format).
 ${memoryBlock}
-SUBTASK DETECTION:
-If the user gives a complex task that naturally breaks into steps (e.g. "plan the team cookout — food, drinks, games, invites"), return it as a subtaskGroup instead of individual newTasks. A subtaskGroup has a parent task and child subtasks.
+SUBTASK DETECTION — CRITICAL RULES:
+Use subtaskGroups (NOT newTasks) whenever the user provides multiple related items that belong under one umbrella. This includes:
+1. Explicit grouping: "for [person/project], I need to do X, Y, Z" — the person/project becomes the parent, X/Y/Z become subtasks.
+2. Multi-step tasks: "plan the team cookout — food, drinks, games, invites" — the plan is the parent, items are subtasks.
+3. Lists tied to a context: "things for the trip: pack bags, book hotel, get snacks" — the trip is the parent, items are subtasks.
+
+EXAMPLES:
+- Input: "for Jason Armstrong I need to send the contract, schedule the onboarding call, and set up his email"
+  → subtaskGroups: [{ parentText: "Jason Armstrong tasks", subtasks: [{text: "Send the contract"}, {text: "Schedule the onboarding call"}, {text: "Set up his email"}] }]
+  → newTasks: []
+
+- Input: "for the Henderson project, review blueprints, order materials, and call the inspector"
+  → subtaskGroups: [{ parentText: "Henderson project", subtasks: [{text: "Review blueprints"}, {text: "Order materials"}, {text: "Call the inspector"}] }]
+  → newTasks: []
+
+- Input: "pick up groceries and call mom"
+  → These are UNRELATED tasks, so they go in newTasks as individual items, NOT subtaskGroups.
+
+RULE: If tasks share a common subject/person/project/context, they MUST go into subtaskGroups. Only use newTasks for standalone, unrelated tasks. When in doubt, prefer subtaskGroups over flat newTasks.
 
 DYNAMIC BUCKET CREATION:
 If the user says phrases like "add a bucket for...", "create a new category for...", "add a new section for...", "I need a bucket called...", or "add [name] as a category", include the new bucket in the newBuckets array.

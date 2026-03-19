@@ -80,18 +80,22 @@ export function useTasks() {
 
       // Process subtaskGroups: create parent + children
       if (result.subtaskGroups?.length) {
+        console.log('[DIAG] Processing subtaskGroups:', result.subtaskGroups.length, 'groups')
         for (const group of result.subtaskGroups) {
           try {
+            console.log('[DIAG] Creating parent task:', group.parentText, '| bucket:', group.bucket)
             const parent = await taskService.addParentTask({
               text: group.parentText,
               bucket: group.bucket,
               priority: group.priority || 'normal',
             })
+            console.log('[DIAG] Parent task created with id:', parent.id, '| is_parent:', parent.is_parent)
             createdTaskIds.push(parent.id)
 
             if (group.subtasks?.length) {
               for (let i = 0; i < group.subtasks.length; i++) {
                 const sub = group.subtasks[i]
+                console.log('[DIAG] Creating subtask', i, ':', sub.text, '| parent_id:', parent.id)
                 const saved = await taskService.addSubtask(
                   {
                     text: sub.text,
@@ -101,6 +105,7 @@ export function useTasks() {
                   parent.id,
                   i
                 )
+                console.log('[DIAG] Subtask created with id:', saved.id, '| parent_task_id:', saved.parent_task_id)
                 createdTaskIds.push(saved.id)
               }
             }
@@ -108,6 +113,8 @@ export function useTasks() {
             console.error('Failed to create subtask group:', err)
           }
         }
+      } else {
+        console.log('[DIAG] No subtaskGroups to process (length:', result.subtaskGroups?.length, ')')
       }
 
       // Add new tasks (regular, non-subtask)
