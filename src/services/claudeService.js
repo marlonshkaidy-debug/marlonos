@@ -6,7 +6,7 @@ const client = new Anthropic({
   dangerouslyAllowBrowser: true,
 })
 
-function buildSystemPrompt() {
+function buildSystemPrompt(memoryContext) {
   const { appName, userName, defaultBuckets, priorityRules } = userConfig
 
   const bucketLines = defaultBuckets
@@ -16,6 +16,25 @@ function buildSystemPrompt() {
   const priorityLines = Object.entries(priorityRules)
     .map(([level, rule]) => `- ${level}: ${rule}`)
     .join('\n')
+
+  let memoryBlock = ''
+  if (memoryContext && memoryContext.length > 0) {
+    const memoryLines = memoryContext
+      .map(
+        (m) =>
+          `- [${m.entity_name}] → ${m.default_bucket} (${m.confidence}): ${m.context || 'no context'}`
+      )
+      .join('\n')
+    memoryBlock = `
+Known entities (your memory of ${userName}'s world):
+${memoryLines}
+
+MEMORY RULES:
+- CONFIRMED entities: respect these absolutely — never override their bucket assignment.
+- INFERRED entities: use as strong guidance, but can be updated if user indicates otherwise.
+- If you encounter a new entity (person, project, place, etc.) not in the list above, include it in memoryUpdates with your best guess for entityType and suggestedBucket.
+`
+  }
 
   return `You are ${appName}, a personal life organizer for ${userName}. You parse natural language input and return structured JSON to manage tasks.
 
@@ -33,6 +52,12 @@ When the user says a time WITHOUT AM/PM: default to PM for times 1:00–7:59 (e.
 
 Auto-assign each task to the most appropriate bucket based on context.
 Parse date references into dueDate (YYYY-MM-DD format).
+${memoryBlock}
+SUBTASK DETECTION:
+If the user gives a complex task that naturally breaks into steps (e.g. "plan the team cookout — food, drinks, games, invites"), return it as a subtaskGroup instead of individual newTasks. A subtaskGroup has a parent task and child subtasks.
+
+DYNAMIC BUCKET CREATION:
+If the user says phrases like "add a bucket for...", "create a new category for...", "add a new section for...", "I need a bucket called...", or "add [name] as a category", include the new bucket in the newBuckets array.
 
 Always respond with valid JSON in this exact structure:
 {
@@ -52,15 +77,37 @@ Always respond with valid JSON in this exact structure:
   "edits": [
     { "text": "partial match of task to edit", "updates": { "field": "new value" } }
   ],
-  "response": "Natural language response to any question the user asked, or null"
+  "response": "Natural language response to any question the user asked, or null",
+  "memoryUpdates": [
+    {
+      "entityName": "name of person/project/place",
+      "entityType": "person|project|place|organization|event",
+      "suggestedBucket": "bucket name",
+      "confidence": "INFERRED",
+      "context": "brief context about this entity"
+    }
+  ],
+  "subtaskGroups": [
+    {
+      "parentText": "parent task description",
+      "bucket": "bucket name",
+      "priority": "critical|high|normal|low",
+      "subtasks": [
+        { "text": "subtask description", "priority": "normal" }
+      ]
+    }
+  ],
+  "newBuckets": [
+    { "bucketName": "new bucket name", "context": "what this bucket is for" }
+  ]
 }
+
+If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable.
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
 }
 
-const SYSTEM_PROMPT = buildSystemPrompt()
-
-export async function parseInput(text, currentTasks) {
+export async function parseInput(text, currentTasks, memoryContext) {
   const taskSummary = currentTasks
     .filter((t) => t.status === 'active')
     .map(
@@ -91,10 +138,12 @@ ${taskSummary || '(none)'}
 
 User input: "${text}"`
 
+  const systemPrompt = buildSystemPrompt(memoryContext)
+
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
   })
 

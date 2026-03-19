@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTasks } from './hooks/useTasks'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
-import { DEFAULT_BUCKETS } from './lib/buckets'
 import userConfig from './config/userConfig'
 import { formatTime } from './utils/time'
 import './App.css'
@@ -11,7 +10,7 @@ import './App.css'
 const ALL_FILTER = 'All'
 
 function App() {
-  const { tasks, loading, addFromText, complete } = useTasks()
+  const { tasks, loading, addFromText, complete, bucketVersion } = useTasks()
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [activeBucket, setActiveBucket] = useState(ALL_FILTER)
@@ -22,6 +21,29 @@ function App() {
   const { isRecording, audioBlob, error: recorderError, startRecording, stopRecording } = useVoiceRecorder()
   const addFromTextRef = useRef(addFromText)
   const pendingTranscription = useRef(false)
+
+  // Reactively compute bucket names from userConfig (re-renders when bucketVersion changes)
+  const bucketNames = useMemo(
+    () => userConfig.defaultBuckets.map((b) => b.name),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bucketVersion]
+  )
+
+  // Build parent→subtask mapping
+  const subtaskMap = useMemo(() => {
+    const map = {}
+    for (const t of tasks) {
+      if (t.parent_task_id) {
+        if (!map[t.parent_task_id]) map[t.parent_task_id] = []
+        map[t.parent_task_id].push(t)
+      }
+    }
+    // Sort subtasks by subtask_order
+    for (const key of Object.keys(map)) {
+      map[key].sort((a, b) => (a.subtask_order || 0) - (b.subtask_order || 0))
+    }
+    return map
+  }, [tasks])
 
   // Keep ref current so the effect always calls the latest addFromText
   useEffect(() => {
@@ -83,10 +105,12 @@ function App() {
     }
   }
 
-  const filteredTasks =
-    activeBucket === ALL_FILTER
-      ? tasks
-      : tasks.filter((t) => t.bucket === activeBucket)
+  // Filter tasks: exclude subtasks from top-level (they render under parents)
+  const filteredTasks = useMemo(() => {
+    const topLevel = tasks.filter((t) => !t.parent_task_id)
+    if (activeBucket === ALL_FILTER) return topLevel
+    return topLevel.filter((t) => t.bucket === activeBucket)
+  }, [tasks, activeBucket])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -140,7 +164,7 @@ function App() {
 
       {/* Bucket Tabs */}
       <div className="bucket-tabs">
-        {[ALL_FILTER, ...DEFAULT_BUCKETS].map((bucket) => (
+        {[ALL_FILTER, ...bucketNames].map((bucket) => (
           <button
             key={bucket}
             className={`bucket-tab ${activeBucket === bucket ? 'active' : ''}`}
@@ -163,7 +187,12 @@ function App() {
           </div>
         ) : (
           filteredTasks.map((task) => (
-            <TaskCard key={task.id} task={task} onComplete={complete} />
+            <ParentTaskCard
+              key={task.id}
+              task={task}
+              subtasks={subtaskMap[task.id] || []}
+              onComplete={complete}
+            />
           ))
         )}
         {sending && (
@@ -227,7 +256,64 @@ function App() {
   )
 }
 
-function TaskCard({ task, onComplete }) {
+function ParentTaskCard({ task, subtasks, onComplete }) {
+  const [expanded, setExpanded] = useState(false)
+  const isParent = task.is_parent && subtasks.length > 0
+
+  if (!isParent) {
+    return <TaskCard task={task} onComplete={onComplete} />
+  }
+
+  const completedCount = subtasks.filter((s) => s.status === 'completed').length
+  const totalCount = subtasks.length
+  const allDone = task.status === 'completed'
+
+  return (
+    <div className={`parent-task-wrapper ${allDone ? 'completed' : ''}`}>
+      <div
+        className={`task-card parent-task ${allDone ? 'completed' : ''}`}
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <button
+          className="task-checkbox"
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!allDone) onComplete(task.id)
+          }}
+          aria-label={allDone ? 'Completed' : 'Mark complete'}
+        >
+          <span className="check-icon">&#10003;</span>
+        </button>
+        <div className="task-content">
+          <div className="task-text">
+            {task.text}
+            <span className="subtask-progress">
+              ({completedCount}/{totalCount})
+            </span>
+          </div>
+          <div className="task-meta">
+            <span className="task-bucket">{task.bucket}</span>
+            {task.priority !== 'normal' && (
+              <span className={`task-priority ${task.priority}`}>
+                {task.priority}
+              </span>
+            )}
+          </div>
+        </div>
+        <span className={`chevron ${expanded ? 'expanded' : ''}`}>&#9660;</span>
+      </div>
+      {expanded && (
+        <div className="subtask-list">
+          {subtasks.map((sub) => (
+            <TaskCard key={sub.id} task={sub} onComplete={onComplete} isSubtask />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TaskCard({ task, onComplete, isSubtask = false }) {
   const isCritical = task.priority === 'critical'
   const isMustDo = task.mustDoToday
   const isCompleted = task.status === 'completed'
@@ -237,6 +323,7 @@ function TaskCard({ task, onComplete }) {
     isCompleted && 'completed',
     isCritical && 'critical',
     isMustDo && 'must-do-today',
+    isSubtask && 'subtask',
   ]
     .filter(Boolean)
     .join(' ')
@@ -253,7 +340,7 @@ function TaskCard({ task, onComplete }) {
       <div className="task-content">
         <div className="task-text">{task.text}</div>
         <div className="task-meta">
-          <span className="task-bucket">{task.bucket}</span>
+          {!isSubtask && <span className="task-bucket">{task.bucket}</span>}
           {task.priority !== 'normal' && (
             <span className={`task-priority ${task.priority}`}>
               {task.priority}

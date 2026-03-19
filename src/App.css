@@ -423,3 +423,75 @@
   z-index: 20;
   cursor: pointer;
 }
+
+/* ── Parent Task & Subtasks ── */
+.parent-task-wrapper {
+  border-left: 3px solid var(--accent);
+}
+
+.parent-task-wrapper.completed {
+  border-left-color: var(--green);
+}
+
+.parent-task {
+  cursor: pointer;
+}
+
+.parent-task .task-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subtask-progress {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 4px;
+}
+
+.chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.subtask-list {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.task-card.subtask {
+  padding-left: 48px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.task-card.subtask .task-checkbox {
+  width: 18px;
+  height: 18px;
+}
+
+.task-card.subtask .task-text {
+  font-size: 14px;
+}
+
+.task-card.subtask .check-icon {
+  font-size: 10px;
+}
+
+/* Parent auto-complete animation */
+.parent-task-wrapper.completed .parent-task {
+  animation: parentComplete 0.4s ease;
+}
+
+@keyframes parentComplete {
+  0% { background: transparent; }
+  50% { background: rgba(76, 175, 80, 0.1); }
+  100% { background: transparent; }
+}
