@@ -42,6 +42,13 @@ export function useTasks() {
         memoryContext
       )
 
+      // === DIAGNOSTIC LOGS (temporary) ===
+      console.log('[DIAG] Full parsed Claude response:', JSON.stringify(result, null, 2))
+      console.log('[DIAG] subtaskGroups present?', Array.isArray(result.subtaskGroups), '| count:', result.subtaskGroups?.length ?? 0)
+      console.log('[DIAG] newBuckets present?', Array.isArray(result.newBuckets), '| count:', result.newBuckets?.length ?? 0)
+      console.log('[DIAG] memoryUpdates present?', Array.isArray(result.memoryUpdates), '| count:', result.memoryUpdates?.length ?? 0)
+      // === END DIAGNOSTIC LOGS ===
+
       // Fire-and-forget: log transcript in background
       const transcriptPromise = logTranscript(rawTranscript, result)
 
