@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as taskService from '../services/taskService'
 import { parseInput } from '../services/claudeService'
+import { logTranscript, linkTaskIds } from '../services/transcriptService'
 import { sortTasks } from '../utils/sort'
 
 export function useTasks() {
@@ -24,12 +25,17 @@ export function useTasks() {
 
   const addFromText = useCallback(
     async (text) => {
-      const result = await parseInput(text, tasks)
+      const { parsed: result, rawTranscript, rawResponse } = await parseInput(text, tasks)
+
+      // Fire-and-forget: log transcript in background
+      const transcriptPromise = logTranscript(rawTranscript, result)
 
       // Add new tasks
+      const createdTaskIds = []
       if (result.newTasks?.length) {
         for (const task of result.newTasks) {
-          await taskService.addTask(task)
+          const saved = await taskService.addTask(task)
+          createdTaskIds.push(saved.id)
         }
       }
 
@@ -62,6 +68,14 @@ export function useTasks() {
       }
 
       await refresh()
+
+      // Fire-and-forget: link task IDs to transcript in background
+      transcriptPromise.then((transcriptId) => {
+        if (transcriptId && createdTaskIds.length) {
+          linkTaskIds(transcriptId, createdTaskIds)
+        }
+      })
+
       return result.response
     },
     [tasks, refresh]

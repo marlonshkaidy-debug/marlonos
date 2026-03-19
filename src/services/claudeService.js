@@ -96,5 +96,6 @@ User input: "${text}"`
     null,
     content,
   ]
-  return JSON.parse(jsonMatch[1].trim())
+  const parsed = JSON.parse(jsonMatch[1].trim())
+  return { parsed, rawTranscript: text, rawResponse: content }
 }
