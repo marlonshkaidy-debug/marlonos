@@ -3,6 +3,7 @@ import { useTasks } from './hooks/useTasks'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { transcribeAudio } from './services/whisperService'
 import { DEFAULT_BUCKETS } from './lib/buckets'
+import userConfig from './config/userConfig'
 import { formatTime } from './utils/time'
 import './App.css'
 
@@ -123,7 +124,7 @@ function App() {
     <>
       {/* Top Bar */}
       <div className="top-bar">
-        <h1>MarlonOS</h1>
+        <h1>{userConfig.appName}</h1>
         <div className="date">{today}</div>
       </div>
 

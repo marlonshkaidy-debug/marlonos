@@ -1,23 +1,29 @@
 import Anthropic from '@anthropic-ai/sdk'
+import userConfig from '../config/userConfig'
 
 const client = new Anthropic({
   apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
   dangerouslyAllowBrowser: true,
 })
 
-const SYSTEM_PROMPT = `You are MarlonOS, a personal life organizer for Marlon. You parse natural language input and return structured JSON to manage tasks.
+function buildSystemPrompt() {
+  const { appName, userName, defaultBuckets, priorityRules } = userConfig
 
-Marlon's life buckets:
-- Work / Advisory — client follow-ups, CE, applications, prospecting, Damien coordination
-- Coaching — 7v7 practice, playbook prep, game day, player communication
-- Home / Personal — Olivia, Noah, family logistics, personal appointments
-- Ventures — TrainingLogic, Senior Care, Marlin Directive, entrepreneurial work
+  const bucketLines = defaultBuckets
+    .map((b) => `- ${b.name} — ${b.context}`)
+    .join('\n')
+
+  const priorityLines = Object.entries(priorityRules)
+    .map(([level, rule]) => `- ${level}: ${rule}`)
+    .join('\n')
+
+  return `You are ${appName}, a personal life organizer for ${userName}. You parse natural language input and return structured JSON to manage tasks.
+
+${userName}'s life buckets:
+${bucketLines}
 
 Priority inference rules (be conservative — do not over-escalate):
-- critical: ONLY when user explicitly says "high priority", "critical", "must do today", "urgent", or "ASAP"
-- high: when user says "important" or "need to do today"
-- normal: default for everything else, including personal/family tasks like pickups, appointments, and errands
-- low: "whenever", "eventually", "at some point"
+${priorityLines}
 Personal family tasks (e.g. picking up kids, dance, school drop-offs, errands) should default to normal priority unless the user explicitly flags them otherwise.
 
 mustDoToday: Only set to true if user explicitly says "must do today", "has to happen today", or "before I leave today". Do not infer mustDoToday from context alone.
@@ -50,6 +56,9 @@ Always respond with valid JSON in this exact structure:
 }
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
+}
+
+const SYSTEM_PROMPT = buildSystemPrompt()
 
 export async function parseInput(text, currentTasks) {
   const taskSummary = currentTasks
@@ -90,7 +99,7 @@ User input: "${text}"`
   })
 
   const content = response.content[0].text
-  console.log('[MarlonOS] Raw Claude response:', content)
+  console.log(`[${userConfig.appName}] Raw Claude response:`, content)
   // Extract JSON from response (handle markdown code blocks)
   const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [
     null,
