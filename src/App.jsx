@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTasks } from './hooks/useTasks'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
+import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
 import { DEFAULT_BUCKETS } from './lib/buckets'
 import userConfig from './config/userConfig'
@@ -14,9 +15,10 @@ function App() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [activeBucket, setActiveBucket] = useState(ALL_FILTER)
-  const [voiceStatus, setVoiceStatus] = useState(null) // 'listening' | 'transcribing' | null
+  const [voiceStatus, setVoiceStatus] = useState(null) // 'recording' | 'transcribing' | null
   const [micError, setMicError] = useState(null)
 
+  const micPermission = useMicPermission()
   const { isRecording, audioBlob, error: recorderError, startRecording, stopRecording } = useVoiceRecorder()
   const addFromTextRef = useRef(addFromText)
   const pendingTranscription = useRef(false)
@@ -69,15 +71,15 @@ function App() {
     run()
   }, [audioBlob])
 
-  const handleMicDown = () => {
+  const handleMicToggle = () => {
     setMicError(null)
-    setVoiceStatus('listening')
-    startRecording()
-  }
-
-  const handleMicUp = () => {
     if (isRecording) {
+      // Second tap: stop recording, send to Whisper
       stopRecording()
+    } else {
+      // First tap: start recording
+      setVoiceStatus('recording')
+      startRecording()
     }
   }
 
@@ -128,6 +130,14 @@ function App() {
         <div className="date">{today}</div>
       </div>
 
+      {/* Mic Permission Denied Banner */}
+      {micPermission === 'denied' && (
+        <div className="mic-denied-banner">
+          Microphone access was denied. To use voice input, enable microphone
+          permission in your browser settings and reload the page.
+        </div>
+      )}
+
       {/* Bucket Tabs */}
       <div className="bucket-tabs">
         {[ALL_FILTER, ...DEFAULT_BUCKETS].map((bucket) => (
@@ -164,7 +174,9 @@ function App() {
       {/* Voice Status Banner */}
       {voiceStatus && (
         <div className="voice-status">
-          {voiceStatus === 'listening' ? 'Listening...' : 'Transcribing...'}
+          {voiceStatus === 'recording'
+            ? 'Recording... tap to send'
+            : 'Transcribing...'}
         </div>
       )}
 
@@ -195,11 +207,9 @@ function App() {
         <button
           type="button"
           className={`mic-btn ${isRecording ? 'recording' : ''}`}
-          onPointerDown={handleMicDown}
-          onPointerUp={handleMicUp}
-          onPointerLeave={handleMicUp}
-          disabled={sending || voiceStatus === 'transcribing'}
-          aria-label="Hold to record"
+          onClick={handleMicToggle}
+          disabled={sending || voiceStatus === 'transcribing' || micPermission === 'denied'}
+          aria-label={isRecording ? 'Tap to send recording' : 'Tap to record'}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="1" width="6" height="12" rx="3" />
