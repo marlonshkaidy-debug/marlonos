@@ -43,6 +43,13 @@ function App() {
     }
   }, [navigationTarget, setNavigationTarget])
 
+  // Reactively compute bucket names from userConfig (must be before effects that use it)
+  const bucketNames = useMemo(
+    () => userConfig.defaultBuckets.map((b) => b.name),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bucketVersion]
+  )
+
   // Handle extended navigationIntent from Claude
   useEffect(() => {
     if (!navigationIntent) return
@@ -91,13 +98,6 @@ function App() {
       startRecording()
     }
   }, [reRecordRequested, isRecording, sending, setReRecordRequested, startRecording])
-
-  // Reactively compute bucket names from userConfig
-  const bucketNames = useMemo(
-    () => userConfig.defaultBuckets.map((b) => b.name),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bucketVersion]
-  )
 
   // Build parent->subtask mapping
   const subtaskMap = useMemo(() => {
