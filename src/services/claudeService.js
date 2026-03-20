@@ -221,6 +221,27 @@ Detect navigation, filtering, and search intents. Set navigationIntent when the 
 - "find [term]" / "search for [term]" / "show me [person] tasks" → action: "search", filter: "[term]"
 Also still set the legacy "navigation" field for basic "tasks"/"lists" navigation for backward compatibility.
 
+LIST MANAGEMENT:
+Detect list-related intents and set listIntent when the user wants to interact with lists. listIntent works globally regardless of which tab is active.
+Actions:
+- CREATE: "create a [permanent/session] list called X" / "start a packing list for X" / "new grocery list"
+  → action: "create", listName: "X", createType: "permanent"|"session", context: "optional context"
+- ADD: "add [items] to my [list name] list" / "add [item] to [list name]"
+  → action: "add", listName: "list name", items: ["item1", "item2"]
+- CHECK: "got the [items]" / "[items] done" / "check off [item] from [list name]"
+  → action: "check", listName: "list name", markDone: ["item1", "item2"]
+- REMOVE: "remove [item] from [list name]" / "take [item] off [list name]"
+  → action: "remove", listName: "list name", removeItems: ["item1"]
+- VIEW: "show me my [list name] list" / "pull up [list name]" / "what's on my [list name]"
+  → action: "view", listName: "list name"
+- DONE: "[list name] done" / "mark [list name] complete" → action: "done", listName: "list name" (checks all items)
+- ARCHIVE: "archive [list name]" / "I'm done with [list name]" → action: "archive", listName: "list name"
+- RECALL: "show me my last [list name]" / "what was on my last grocery list" → action: "recall", listName: "list name"
+
+Permanent vs Session detection:
+- Permanent: "grocery list", "football gear", "always pack", any recurring list name
+- Session: "packing list for X", "list for X trip", "shopping list for X event" — anything tied to a specific occasion
+
 Always respond with valid JSON in this exact structure:
 {
   "newTasks": [
@@ -268,6 +289,7 @@ Always respond with valid JSON in this exact structure:
   "appendToParent": null,
   "navigation": null,
   "navigationIntent": null,
+  "listIntent": null,
   "voiceCorrection": null,
   "vocabularyUpdate": null
 }
@@ -276,10 +298,11 @@ deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed
 appendToParent, when present, should be: { "parentIdentifier": "partial match of existing parent task text", "newSubtasks": [{ "text": "subtask description", "priority": "normal" }] }
 navigation, when present, should be: "tasks" or "lists"
 navigationIntent, when present, should be: { "action": "navigate|filter|search", "target": "tasks|lists", "filter": "bucket name or search term or null" }
+listIntent, when present, should be: { "action": "create|add|check|remove|view|done|archive|recall", "listName": "name of the list", "items": ["items to add"], "markDone": ["items to check"], "removeItems": ["items to remove"], "createType": "permanent|session", "context": "optional context for session lists" }
 voiceCorrection, when present, should be: { "type": "redo|cancel|amend|priority|bucket|reschedule", "targetDescription": "description of what is being corrected", "action": "what to do", "value": "the new value if applicable" }
 vocabularyUpdate, when present, should be: { "term": "the term", "definition": "the definition" }
 
-If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, navigation, navigationIntent, voiceCorrection, and vocabularyUpdate default to null.
+If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, navigation, navigationIntent, listIntent, voiceCorrection, and vocabularyUpdate default to null.
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
 }

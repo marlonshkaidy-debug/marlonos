@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTasks } from './hooks/useTasks'
+import { useLists } from './hooks/useLists'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
 import { updateTask } from './services/taskService'
 import userConfig from './config/userConfig'
 import { formatTime, getDueDateLabel, getDateSection, getUpcomingGroup, getDaysOverdue } from './utils/time'
+import ListsView from './pages/ListsView'
+import SearchModal from './components/SearchModal'
 import './App.css'
 
 const ALL_FILTER = 'All'
@@ -19,7 +22,23 @@ function App() {
     navigationIntent, setNavigationIntent,
     searchTerm, setSearchTerm, clearSearch,
     reRecordRequested, setReRecordRequested,
+    searchModal, setSearchModal,
+    listsRefreshRef,
   } = useTasks()
+  const {
+    activeLists,
+    loading: listsLoading,
+    createList,
+    addItemToList,
+    checkItem: checkListItem,
+    uncheckItem: uncheckListItem,
+    checkAllItems,
+    deleteList,
+    archiveList,
+    deleteItem: deleteListItem,
+    toggleItemCore,
+    refreshLists,
+  } = useLists()
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [activeBucket, setActiveBucket] = useState(ALL_FILTER)
@@ -34,6 +53,11 @@ function App() {
   const { isRecording, audioBlob, error: recorderError, startRecording, stopRecording } = useVoiceRecorder()
   const addFromTextRef = useRef(addFromText)
   const pendingTranscription = useRef(false)
+
+  // Wire listsRefreshRef so useTasks can trigger list refresh after list intents
+  useEffect(() => {
+    listsRefreshRef.current = refreshLists
+  }, [listsRefreshRef, refreshLists])
 
   // Handle voice navigation from Claude (legacy)
   useEffect(() => {
@@ -432,10 +456,21 @@ function App() {
             </div>
           </>
         ) : (
-          /* Lists placeholder view */
-          <div className="lists-placeholder">
-            <div className="lists-placeholder-text">Lists coming soon</div>
-          </div>
+          /* Lists view */
+          <ListsView
+            activeLists={activeLists}
+            loading={listsLoading}
+            onCreateList={createList}
+            onOpenList={(list) => {
+              setSearchModal({
+                isOpen: true,
+                title: list.name,
+                type: 'list',
+                data: list.list_items || [],
+                listId: list.id,
+              })
+            }}
+          />
         )}
       </div>
 
@@ -512,6 +547,66 @@ function App() {
           <span>Lists</span>
         </button>
       </nav>
+
+      {/* Search / List Modal */}
+      <SearchModal
+        modal={searchModal}
+        onClose={() => setSearchModal({ isOpen: false, title: '', type: 'tasks', data: [], listId: null })}
+        onCheckItem={(itemId, listId) => {
+          checkListItem(itemId, listId)
+          setSearchModal((prev) => ({
+            ...prev,
+            data: prev.data.map((i) =>
+              i.id === itemId ? { ...i, is_checked: true, checked_at: new Date().toISOString() } : i
+            ),
+          }))
+        }}
+        onUncheckItem={(itemId, listId) => {
+          uncheckListItem(itemId, listId)
+          setSearchModal((prev) => ({
+            ...prev,
+            data: prev.data.map((i) =>
+              i.id === itemId ? { ...i, is_checked: false, checked_at: null } : i
+            ),
+          }))
+        }}
+        onCheckAll={(listId) => {
+          checkAllItems(listId)
+          setSearchModal((prev) => ({
+            ...prev,
+            data: prev.data.map((i) => ({
+              ...i,
+              is_checked: true,
+              checked_at: i.checked_at || new Date().toISOString(),
+            })),
+          }))
+        }}
+        onDeleteItem={(itemId, listId) => {
+          deleteListItem(itemId, listId)
+          setSearchModal((prev) => ({
+            ...prev,
+            data: prev.data.filter((i) => i.id !== itemId),
+          }))
+        }}
+        onToggleCore={(itemId, listId, isCore) => {
+          toggleItemCore(itemId, listId, isCore)
+          setSearchModal((prev) => ({
+            ...prev,
+            data: prev.data.map((i) =>
+              i.id === itemId ? { ...i, is_core: isCore } : i
+            ),
+          }))
+        }}
+        onAddItem={async (listId, text) => {
+          const newItem = await addItemToList(listId, text)
+          if (newItem) {
+            setSearchModal((prev) => ({
+              ...prev,
+              data: [...prev.data, newItem],
+            }))
+          }
+        }}
+      />
 
       {/* Bottom Input Bar */}
       <form className="input-bar" onSubmit={handleSubmit}>

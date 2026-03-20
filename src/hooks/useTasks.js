@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import * as taskService from '../services/taskService'
 import * as memoryService from '../services/memoryService'
+import * as listService from '../services/listService'
 import { parseInput } from '../services/claudeService'
 import { logTranscript, linkTaskIds } from '../services/transcriptService'
 import { sortTasks } from '../utils/sort'
@@ -15,7 +16,10 @@ export function useTasks() {
   const [navigationIntent, setNavigationIntent] = useState(null)
   const [searchTerm, setSearchTerm] = useState(null)
   const [reRecordRequested, setReRecordRequested] = useState(false)
+  const [searchModal, setSearchModal] = useState({ isOpen: false, title: '', type: 'tasks', data: [], listId: null })
   const lastAddedTaskIds = useRef([])
+  // Ref to allow list refresh callback from outside
+  const listsRefreshRef = useRef(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -325,6 +329,143 @@ export function useTasks() {
         setNavigationIntent(result.navigationIntent)
       }
 
+      // === LIST INTENT PROCESSING ===
+      if (result.listIntent) {
+        const li = result.listIntent
+        console.log('[ListIntent] action:', li.action, '| listName:', li.listName)
+
+        try {
+          if (li.action === 'create') {
+            // Check for existing list to pre-populate core items
+            const coreItems = await listService.getCoreItems(li.listName)
+            const newList = await listService.createList(
+              li.listName,
+              li.createType || 'permanent',
+              li.context || null
+            )
+            if (newList && coreItems.length > 0) {
+              for (let i = 0; i < coreItems.length; i++) {
+                await listService.addItem(newList.id, coreItems[i].text, true, i)
+              }
+            }
+            // Add any items specified in the create command
+            if (newList && li.items?.length) {
+              const offset = coreItems.length
+              for (let i = 0; i < li.items.length; i++) {
+                await listService.addItem(newList.id, li.items[i], false, offset + i)
+              }
+            }
+            if (listsRefreshRef.current) listsRefreshRef.current()
+          }
+
+          if (li.action === 'add' && li.listName) {
+            // Find matching list
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match && li.items?.length) {
+              const existingCount = (match.list_items || []).length
+              for (let i = 0; i < li.items.length; i++) {
+                await listService.addItem(match.id, li.items[i], false, existingCount + i)
+              }
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'check' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match && li.markDone?.length) {
+              for (const doneText of li.markDone) {
+                const item = (match.list_items || []).find(
+                  (i) => i.text.toLowerCase().includes(doneText.toLowerCase()) && !i.is_checked
+                )
+                if (item) await listService.checkItem(item.id)
+              }
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'remove' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match && li.removeItems?.length) {
+              for (const removeText of li.removeItems) {
+                const item = (match.list_items || []).find(
+                  (i) => i.text.toLowerCase().includes(removeText.toLowerCase())
+                )
+                if (item) await listService.deleteItem(item.id)
+              }
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'view' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              const fullList = await listService.getList(match.id)
+              setSearchModal({
+                isOpen: true,
+                title: fullList.name,
+                type: 'list',
+                data: fullList.list_items || [],
+                listId: fullList.id,
+              })
+            }
+          }
+
+          if (li.action === 'done' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              await listService.checkAllItems(match.id)
+              // Auto-promote core items silently
+              listService.promoteCoreItems(match.id).catch(() => {})
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'archive' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              await listService.archiveList(match.id)
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'recall' && li.listName) {
+            const archived = await listService.getArchivedLists()
+            const match = archived.find(
+              (l) => l.name.toLowerCase().includes(li.listName.toLowerCase())
+            )
+            if (match) {
+              setSearchModal({
+                isOpen: true,
+                title: `${match.name} (archived)`,
+                type: 'list',
+                data: match.list_items || [],
+                listId: match.id,
+              })
+            }
+          }
+        } catch (err) {
+          console.error('[ListIntent] Failed to process list intent:', err)
+        }
+      }
+
       // Track last added task IDs for voice correction
       if (createdTaskIds.length > 0) {
         lastAddedTaskIds.current = createdTaskIds
@@ -403,6 +544,9 @@ export function useTasks() {
     setSearchTerm,
     reRecordRequested,
     setReRecordRequested,
+    searchModal,
+    setSearchModal,
+    listsRefreshRef,
     navigate,
     filterTo,
     searchFor,
