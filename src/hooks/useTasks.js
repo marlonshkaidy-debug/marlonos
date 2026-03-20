@@ -10,6 +10,8 @@ export function useTasks() {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [bucketVersion, setBucketVersion] = useState(0)
+  const [pendingDeleteBucket, setPendingDeleteBucket] = useState(null)
+  const [navigationTarget, setNavigationTarget] = useState(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -166,6 +168,36 @@ export function useTasks() {
         }
       }
 
+      // Process deleteBucket
+      if (result.deleteBucket) {
+        const { bucketName, confirmed } = result.deleteBucket
+        if (userConfig.isDefaultBucket(bucketName)) {
+          // Claude should already set response, but just in case
+        } else if (!confirmed) {
+          // Count active tasks in this bucket
+          const activeInBucket = tasks.filter(
+            (t) => t.status === 'active' && t.bucket.toLowerCase() === bucketName.toLowerCase()
+          ).length
+          setPendingDeleteBucket({ bucketName, activeCount: activeInBucket })
+        } else {
+          // Confirmed deletion — reassign tasks to Home / Personal
+          const tasksInBucket = tasks.filter(
+            (t) => t.status === 'active' && t.bucket.toLowerCase() === bucketName.toLowerCase()
+          )
+          for (const t of tasksInBucket) {
+            await taskService.updateTask(t.id, { bucket: 'Home / Personal' })
+          }
+          userConfig.removeCustomBucket(bucketName)
+          setBucketVersion((v) => v + 1)
+          setPendingDeleteBucket(null)
+        }
+      }
+
+      // Process navigation
+      if (result.navigation) {
+        setNavigationTarget(result.navigation)
+      }
+
       // Update last_referenced for all entities mentioned in memory
       if (memoryContext.length > 0) {
         const inputLower = text.toLowerCase()
@@ -204,5 +236,16 @@ export function useTasks() {
     [tasks, refresh]
   )
 
-  return { tasks, loading, addFromText, complete, refresh, bucketVersion }
+  return {
+    tasks,
+    loading,
+    addFromText,
+    complete,
+    refresh,
+    bucketVersion,
+    pendingDeleteBucket,
+    setPendingDeleteBucket,
+    navigationTarget,
+    setNavigationTarget,
+  }
 }

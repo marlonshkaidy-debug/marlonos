@@ -34,6 +34,15 @@
   line-height: 1.4;
 }
 
+/* ── Main Content Area ── */
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 130px; /* space for bottom-nav + input-bar */
+}
+
 /* ── Bucket Tabs ── */
 .bucket-tabs {
   display: flex;
@@ -43,6 +52,7 @@
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .bucket-tabs::-webkit-scrollbar {
@@ -70,7 +80,7 @@
 .task-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0 100px;
+  padding: 0 0 8px;
 }
 
 .task-list-empty {
@@ -78,6 +88,81 @@
   padding: 48px 16px;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* ── Three-Layer Section Headers ── */
+.task-section {
+  border-bottom: 1px solid var(--border);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  width: 100%;
+  background: var(--surface);
+  border: none;
+  cursor: default;
+}
+
+button.section-header {
+  cursor: pointer;
+}
+
+button.section-header:hover {
+  background: var(--surface-hover);
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.section-overdue .section-title {
+  color: #DC2626;
+}
+
+.section-today .section-title {
+  color: var(--text);
+}
+
+.section-upcoming .section-title {
+  color: #6B7280;
+}
+
+.section-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+
+.section-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+/* ── Collapsible Section Body ── */
+.section-body {
+  max-height: 2000px;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+  opacity: 1;
+}
+
+.section-body.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* ── Upcoming Sub-groups ── */
+.upcoming-group-header {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #6B7280;
+  padding: 8px 16px 4px;
+  background: rgba(107, 114, 128, 0.05);
 }
 
 /* ── Task Card ── */
@@ -96,6 +181,19 @@
 
 .task-card.completed {
   opacity: 0.45;
+}
+
+/* ── Overdue Task Styling ── */
+.task-card.overdue .task-text,
+.overdue-text {
+  color: #DC2626 !important;
+}
+
+.overdue-ago {
+  font-size: 12px;
+  color: #DC2626;
+  font-weight: 500;
+  opacity: 0.8;
 }
 
 .task-checkbox {
@@ -136,6 +234,10 @@
   border-color: var(--red);
 }
 
+.task-card.overdue .task-checkbox {
+  border-color: #DC2626;
+}
+
 .task-content {
   flex: 1;
   min-width: 0;
@@ -164,13 +266,21 @@
   flex-wrap: wrap;
 }
 
+/* ── Bucket Chip (color-coded via inline style) ── */
 .task-bucket {
   font-size: 11px;
-  color: var(--accent);
-  background: var(--accent-dim);
   padding: 2px 8px;
   border-radius: 10px;
   font-weight: 500;
+}
+
+/* ── Due Date Chip ── */
+.task-due-chip {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .task-priority {
@@ -202,6 +312,42 @@
   color: var(--text-muted);
 }
 
+/* ── Bottom Navigation ── */
+.bottom-nav {
+  position: fixed;
+  bottom: 60px;
+  bottom: calc(60px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 20;
+}
+
+.bottom-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: #6B7280;
+  transition: color 0.15s ease;
+}
+
+.bottom-nav-item.active {
+  color: #c9a84c;
+}
+
+.bottom-nav-item svg {
+  transition: color 0.15s ease;
+}
+
 /* ── Bottom Input Bar ── */
 .input-bar {
   position: fixed;
@@ -210,14 +356,14 @@
   transform: translateX(-50%);
   width: 100%;
   max-width: 480px;
-  padding: 12px 12px;
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 8px 12px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
   background: var(--surface);
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
   align-items: center;
-  z-index: 20;
+  z-index: 21;
   box-sizing: border-box;
 }
 
@@ -305,6 +451,62 @@
   flex-shrink: 0;
 }
 
+/* ── Delete Bucket Confirmation Banner ── */
+.delete-bucket-banner {
+  position: fixed;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 460px;
+  width: calc(100% - 20px);
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  z-index: 30;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.delete-bucket-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.delete-bucket-actions button {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.delete-bucket-actions button:first-child {
+  background: #DC2626;
+  color: white;
+}
+
+.delete-bucket-actions button:last-child {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+/* ── Lists Placeholder ── */
+.lists-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lists-placeholder-text {
+  color: var(--text-muted);
+  font-size: 16px;
+  font-weight: 500;
+}
+
 /* ── Modal ── */
 .modal-overlay {
   position: fixed;
@@ -389,7 +591,7 @@
 /* ── Voice Status ── */
 .voice-status {
   position: fixed;
-  bottom: 72px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
   max-width: 480px;
@@ -408,7 +610,7 @@
 /* ── Mic Error ── */
 .mic-error {
   position: fixed;
-  bottom: 72px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
   max-width: 480px;
@@ -431,6 +633,10 @@
 
 .parent-task-wrapper.completed {
   border-left-color: var(--green);
+}
+
+.parent-task-wrapper.overdue {
+  border-left-color: #DC2626;
 }
 
 .parent-task {

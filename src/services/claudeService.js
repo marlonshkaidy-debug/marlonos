@@ -76,6 +76,17 @@ RULE: If tasks share a common subject/person/project/context, they MUST go into 
 DYNAMIC BUCKET CREATION:
 If the user says phrases like "add a bucket for...", "create a new category for...", "add a new section for...", "I need a bucket called...", or "add [name] as a category", include the new bucket in the newBuckets array.
 
+DELETE BUCKET:
+If the user says "delete the [bucket name] bucket", "remove the [bucket name] bucket", or similar, include a deleteBucket object.
+- Set "bucketName" to the bucket name they want to delete.
+- Set "confirmed" to false initially. If the user says "confirm" in the context of a pending bucket deletion, set "confirmed" to true.
+- Default buckets (Work / Advisory, Coaching, Home / Personal, Ventures) CANNOT be deleted. If the user tries, set response to "That's a default bucket and cannot be deleted" and leave deleteBucket as null.
+
+NAVIGATION:
+If the user says "go to lists", "show me my lists", "open lists", "switch to lists" → set navigation to "lists".
+If the user says "go to tasks", "show me my tasks", "open tasks", "switch to tasks" → set navigation to "tasks".
+Otherwise set navigation to null.
+
 Always respond with valid JSON in this exact structure:
 {
   "newTasks": [
@@ -116,10 +127,15 @@ Always respond with valid JSON in this exact structure:
   ],
   "newBuckets": [
     { "bucketName": "new bucket name", "context": "what this bucket is for" }
-  ]
+  ],
+  "deleteBucket": null,
+  "navigation": null
 }
 
-If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable.
+deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed": true/false }
+navigation, when present, should be: "tasks" or "lists"
+
+If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket and navigation default to null.
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
 }

@@ -3,33 +3,50 @@ import { useTasks } from './hooks/useTasks'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
+import { updateTask } from './services/taskService'
 import userConfig from './config/userConfig'
-import { formatTime } from './utils/time'
+import { formatTime, getDueDateLabel, getDateSection, getUpcomingGroup, getDaysOverdue } from './utils/time'
 import './App.css'
 
 const ALL_FILTER = 'All'
+const PRIORITY_ORDER = { critical: 0, high: 1, normal: 2, low: 3 }
 
 function App() {
-  const { tasks, loading, addFromText, complete, bucketVersion } = useTasks()
+  const {
+    tasks, loading, addFromText, complete, bucketVersion,
+    pendingDeleteBucket, setPendingDeleteBucket,
+    navigationTarget, setNavigationTarget,
+  } = useTasks()
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [activeBucket, setActiveBucket] = useState(ALL_FILTER)
-  const [voiceStatus, setVoiceStatus] = useState(null) // 'recording' | 'transcribing' | null
+  const [voiceStatus, setVoiceStatus] = useState(null)
   const [micError, setMicError] = useState(null)
+  const [activeNav, setActiveNav] = useState('tasks') // 'tasks' | 'lists'
+  const [overdueCollapsed, setOverdueCollapsed] = useState(false)
+  const [upcomingCollapsed, setUpcomingCollapsed] = useState(false)
 
   const micPermission = useMicPermission()
   const { isRecording, audioBlob, error: recorderError, startRecording, stopRecording } = useVoiceRecorder()
   const addFromTextRef = useRef(addFromText)
   const pendingTranscription = useRef(false)
 
-  // Reactively compute bucket names from userConfig (re-renders when bucketVersion changes)
+  // Handle voice navigation from Claude
+  useEffect(() => {
+    if (navigationTarget) {
+      setActiveNav(navigationTarget)
+      setNavigationTarget(null)
+    }
+  }, [navigationTarget, setNavigationTarget])
+
+  // Reactively compute bucket names from userConfig
   const bucketNames = useMemo(
     () => userConfig.defaultBuckets.map((b) => b.name),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bucketVersion]
   )
 
-  // Build parent→subtask mapping
+  // Build parent->subtask mapping
   const subtaskMap = useMemo(() => {
     const map = {}
     for (const t of tasks) {
@@ -38,19 +55,16 @@ function App() {
         map[t.parent_task_id].push(t)
       }
     }
-    // Sort subtasks by subtask_order
     for (const key of Object.keys(map)) {
       map[key].sort((a, b) => (a.subtask_order || 0) - (b.subtask_order || 0))
     }
     return map
   }, [tasks])
 
-  // Keep ref current so the effect always calls the latest addFromText
   useEffect(() => {
     addFromTextRef.current = addFromText
   }, [addFromText])
 
-  // Show mic permission errors
   useEffect(() => {
     if (recorderError) {
       setMicError(recorderError)
@@ -71,10 +85,7 @@ function App() {
           console.error('Transcription returned empty result')
           return
         }
-
         setInput(transcript)
-
-        // Auto-submit the transcript
         setSending(true)
         try {
           await addFromTextRef.current(transcript)
@@ -89,28 +100,83 @@ function App() {
         pendingTranscription.current = false
       }
     }
-
     run()
   }, [audioBlob])
 
   const handleMicToggle = () => {
     setMicError(null)
     if (isRecording) {
-      // Second tap: stop recording, send to Whisper
       stopRecording()
     } else {
-      // First tap: start recording
       setVoiceStatus('recording')
       startRecording()
     }
   }
 
-  // Filter tasks: exclude subtasks from top-level (they render under parents)
+  // Filter tasks: exclude subtasks from top-level
   const filteredTasks = useMemo(() => {
     const topLevel = tasks.filter((t) => !t.parent_task_id)
     if (activeBucket === ALL_FILTER) return topLevel
     return topLevel.filter((t) => t.bucket === activeBucket)
   }, [tasks, activeBucket])
+
+  // Three-layer grouping
+  const { overdueTasks, todayTasks, upcomingGroups } = useMemo(() => {
+    const overdue = []
+    const today = []
+    const upcoming = []
+
+    for (const task of filteredTasks) {
+      if (task.status === 'completed') {
+        today.push(task) // completed tasks go to today section
+        continue
+      }
+      const section = getDateSection(task.dueDate, task.status)
+      if (section === 'OVERDUE') overdue.push(task)
+      else if (section === 'UPCOMING') upcoming.push(task)
+      else today.push(task)
+    }
+
+    // Sort overdue by how many days overdue (most overdue first)
+    overdue.sort((a, b) => getDaysOverdue(b.dueDate) - getDaysOverdue(a.dueDate))
+
+    // Sort today by priority
+    today.sort((a, b) => {
+      const aComp = a.status === 'completed'
+      const bComp = b.status === 'completed'
+      if (aComp !== bComp) return aComp ? 1 : -1
+      const aPri = PRIORITY_ORDER[a.priority] ?? 2
+      const bPri = PRIORITY_ORDER[b.priority] ?? 2
+      return aPri - bPri
+    })
+
+    // Group upcoming by day
+    const groupMap = new Map()
+    const groupOrder = []
+    for (const task of upcoming) {
+      const group = getUpcomingGroup(task.dueDate)
+      if (!groupMap.has(group)) {
+        groupMap.set(group, [])
+        groupOrder.push(group)
+      }
+      groupMap.get(group).push(task)
+    }
+    // Sort within each group by priority then scheduledTime
+    for (const [, tasks] of groupMap) {
+      tasks.sort((a, b) => {
+        const aPri = PRIORITY_ORDER[a.priority] ?? 2
+        const bPri = PRIORITY_ORDER[b.priority] ?? 2
+        if (aPri !== bPri) return aPri - bPri
+        const aTime = a.scheduledTime ? new Date(a.scheduledTime).getTime() : Infinity
+        const bTime = b.scheduledTime ? new Date(b.scheduledTime).getTime() : Infinity
+        return aTime - bTime
+      })
+    }
+
+    const groups = groupOrder.map((name) => ({ name, tasks: groupMap.get(name) }))
+
+    return { overdueTasks: overdue, todayTasks: today, upcomingGroups: groups }
+  }, [filteredTasks])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -162,43 +228,149 @@ function App() {
         </div>
       )}
 
-      {/* Bucket Tabs */}
-      <div className="bucket-tabs">
-        {[ALL_FILTER, ...bucketNames].map((bucket) => (
-          <button
-            key={bucket}
-            className={`bucket-tab ${activeBucket === bucket ? 'active' : ''}`}
-            onClick={() => setActiveBucket(bucket)}
-          >
-            {bucket}
-          </button>
-        ))}
+      {/* Main Content Area */}
+      <div className="main-content">
+        {activeNav === 'tasks' ? (
+          <>
+            {/* Bucket Tabs — Tasks view only */}
+            <div className="bucket-tabs">
+              {[ALL_FILTER, ...bucketNames].map((bucket) => (
+                <button
+                  key={bucket}
+                  className={`bucket-tab ${activeBucket === bucket ? 'active' : ''}`}
+                  onClick={() => setActiveBucket(bucket)}
+                >
+                  {bucket}
+                </button>
+              ))}
+            </div>
+
+            {/* Three-Layer Task List */}
+            <div className="task-list">
+              {loading ? (
+                <div className="loading-spinner">Loading tasks...</div>
+              ) : filteredTasks.length === 0 ? (
+                <div className="task-list-empty">
+                  {activeBucket === ALL_FILTER
+                    ? 'No tasks yet. Type below to add some.'
+                    : `No tasks in ${activeBucket}.`}
+                </div>
+              ) : (
+                <>
+                  {/* OVERDUE Section */}
+                  {overdueTasks.length > 0 && (
+                    <div className="task-section">
+                      <button
+                        className="section-header section-overdue"
+                        onClick={() => setOverdueCollapsed((c) => !c)}
+                      >
+                        <span className="section-title">OVERDUE ({overdueTasks.length})</span>
+                        <span className={`section-chevron ${overdueCollapsed ? '' : 'expanded'}`}>&#9660;</span>
+                      </button>
+                      <div className={`section-body ${overdueCollapsed ? 'collapsed' : ''}`}>
+                        {overdueTasks.map((task) => (
+                          <ParentTaskCard
+                            key={task.id}
+                            task={task}
+                            subtasks={subtaskMap[task.id] || []}
+                            onComplete={complete}
+                            isOverdue
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TODAY Section */}
+                  {todayTasks.length > 0 && (
+                    <div className="task-section">
+                      <div className="section-header section-today">
+                        <span className="section-title">TODAY</span>
+                      </div>
+                      <div className="section-body">
+                        {todayTasks.map((task) => (
+                          <ParentTaskCard
+                            key={task.id}
+                            task={task}
+                            subtasks={subtaskMap[task.id] || []}
+                            onComplete={complete}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* UPCOMING Section */}
+                  {upcomingGroups.length > 0 && (
+                    <div className="task-section">
+                      <button
+                        className="section-header section-upcoming"
+                        onClick={() => setUpcomingCollapsed((c) => !c)}
+                      >
+                        <span className="section-title">UPCOMING</span>
+                        <span className={`section-chevron ${upcomingCollapsed ? '' : 'expanded'}`}>&#9660;</span>
+                      </button>
+                      <div className={`section-body ${upcomingCollapsed ? 'collapsed' : ''}`}>
+                        {upcomingGroups.map((group) => (
+                          <div key={group.name} className="upcoming-group">
+                            <div className="upcoming-group-header">{group.name}</div>
+                            {group.tasks.map((task) => (
+                              <ParentTaskCard
+                                key={task.id}
+                                task={task}
+                                subtasks={subtaskMap[task.id] || []}
+                                onComplete={complete}
+                              />
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {sending && (
+                <div className="sending-indicator">Processing with Claude...</div>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Lists placeholder view */
+          <div className="lists-placeholder">
+            <div className="lists-placeholder-text">Lists coming soon</div>
+          </div>
+        )}
       </div>
 
-      {/* Task List */}
-      <div className="task-list">
-        {loading ? (
-          <div className="loading-spinner">Loading tasks...</div>
-        ) : filteredTasks.length === 0 ? (
-          <div className="task-list-empty">
-            {activeBucket === ALL_FILTER
-              ? 'No tasks yet. Type below to add some.'
-              : `No tasks in ${activeBucket}.`}
+      {/* Delete Bucket Confirmation Banner */}
+      {pendingDeleteBucket && (
+        <div className="delete-bucket-banner">
+          <span>
+            {pendingDeleteBucket.activeCount > 0
+              ? `"${pendingDeleteBucket.bucketName}" has ${pendingDeleteBucket.activeCount} active task${pendingDeleteBucket.activeCount !== 1 ? 's' : ''}. Say "confirm" to delete and move tasks to Home / Personal, or "cancel".`
+              : `Delete "${pendingDeleteBucket.bucketName}" bucket? Say "confirm" or "cancel".`}
+          </span>
+          <div className="delete-bucket-actions">
+            <button
+              onClick={async () => {
+                // Reassign tasks and remove bucket
+                const tasksInBucket = tasks.filter(
+                  (t) => t.status === 'active' && t.bucket.toLowerCase() === pendingDeleteBucket.bucketName.toLowerCase()
+                )
+                for (const t of tasksInBucket) {
+                  await updateTask(t.id, { bucket: 'Home / Personal' })
+                }
+                userConfig.removeCustomBucket(pendingDeleteBucket.bucketName)
+                setPendingDeleteBucket(null)
+                window.location.reload()
+              }}
+            >
+              Confirm
+            </button>
+            <button onClick={() => setPendingDeleteBucket(null)}>Cancel</button>
           </div>
-        ) : (
-          filteredTasks.map((task) => (
-            <ParentTaskCard
-              key={task.id}
-              task={task}
-              subtasks={subtaskMap[task.id] || []}
-              onComplete={complete}
-            />
-          ))
-        )}
-        {sending && (
-          <div className="sending-indicator">Processing with Claude...</div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Voice Status Banner */}
       {voiceStatus && (
@@ -215,6 +387,34 @@ function App() {
           {micError}
         </div>
       )}
+
+      {/* Bottom Navigation */}
+      <nav className="bottom-nav">
+        <button
+          className={`bottom-nav-item ${activeNav === 'tasks' ? 'active' : ''}`}
+          onClick={() => setActiveNav('tasks')}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+          </svg>
+          <span>Tasks</span>
+        </button>
+        <button
+          className={`bottom-nav-item ${activeNav === 'lists' ? 'active' : ''}`}
+          onClick={() => setActiveNav('lists')}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <line x1="3" y1="6" x2="3.01" y2="6" />
+            <line x1="3" y1="12" x2="3.01" y2="12" />
+            <line x1="3" y1="18" x2="3.01" y2="18" />
+          </svg>
+          <span>Lists</span>
+        </button>
+      </nav>
 
       {/* Bottom Input Bar */}
       <form className="input-bar" onSubmit={handleSubmit}>
@@ -251,27 +451,29 @@ function App() {
           &uarr;
         </button>
       </form>
-
     </>
   )
 }
 
-function ParentTaskCard({ task, subtasks, onComplete }) {
+function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
   const [expanded, setExpanded] = useState(false)
   const isParent = task.is_parent && subtasks.length > 0
 
   if (!isParent) {
-    return <TaskCard task={task} onComplete={onComplete} />
+    return <TaskCard task={task} onComplete={onComplete} isOverdue={isOverdue} />
   }
 
   const completedCount = subtasks.filter((s) => s.status === 'completed').length
   const totalCount = subtasks.length
   const allDone = task.status === 'completed'
 
+  const bucketColor = isOverdue ? '#DC2626' : userConfig.getBucketColor(task.bucket)
+  const dueDateLabel = getDueDateLabel(task.dueDate)
+
   return (
-    <div className={`parent-task-wrapper ${allDone ? 'completed' : ''}`}>
+    <div className={`parent-task-wrapper ${allDone ? 'completed' : ''} ${isOverdue ? 'overdue' : ''}`}>
       <div
-        className={`task-card parent-task ${allDone ? 'completed' : ''}`}
+        className={`task-card parent-task ${allDone ? 'completed' : ''} ${isOverdue ? 'overdue' : ''}`}
         onClick={() => setExpanded((e) => !e)}
       >
         <button
@@ -285,14 +487,24 @@ function ParentTaskCard({ task, subtasks, onComplete }) {
           <span className="check-icon">&#10003;</span>
         </button>
         <div className="task-content">
-          <div className="task-text">
+          <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`}>
             {task.text}
             <span className="subtask-progress">
               ({completedCount}/{totalCount})
             </span>
           </div>
           <div className="task-meta">
-            <span className="task-bucket">{task.bucket}</span>
+            <span
+              className="task-bucket"
+              style={{ background: `${bucketColor}20`, color: bucketColor }}
+            >
+              {task.bucket}
+            </span>
+            {dueDateLabel && (
+              <span className="task-due-chip" style={{ color: dueDateLabel.color }}>
+                {dueDateLabel.text}
+              </span>
+            )}
             {task.priority !== 'normal' && (
               <span className={`task-priority ${task.priority}`}>
                 {task.priority}
@@ -305,7 +517,7 @@ function ParentTaskCard({ task, subtasks, onComplete }) {
       {expanded && (
         <div className="subtask-list">
           {subtasks.map((sub) => (
-            <TaskCard key={sub.id} task={sub} onComplete={onComplete} isSubtask />
+            <TaskCard key={sub.id} task={sub} onComplete={onComplete} isSubtask isOverdue={isOverdue} />
           ))}
         </div>
       )}
@@ -313,7 +525,7 @@ function ParentTaskCard({ task, subtasks, onComplete }) {
   )
 }
 
-function TaskCard({ task, onComplete, isSubtask = false }) {
+function TaskCard({ task, onComplete, isSubtask = false, isOverdue = false }) {
   const isCritical = task.priority === 'critical'
   const isMustDo = task.mustDoToday
   const isCompleted = task.status === 'completed'
@@ -324,9 +536,14 @@ function TaskCard({ task, onComplete, isSubtask = false }) {
     isCritical && 'critical',
     isMustDo && 'must-do-today',
     isSubtask && 'subtask',
+    isOverdue && 'overdue',
   ]
     .filter(Boolean)
     .join(' ')
+
+  const bucketColor = isOverdue ? '#DC2626' : userConfig.getBucketColor(task.bucket)
+  const dueDateLabel = getDueDateLabel(task.dueDate)
+  const daysOver = getDaysOverdue(task.dueDate)
 
   return (
     <div className={classes}>
@@ -338,9 +555,26 @@ function TaskCard({ task, onComplete, isSubtask = false }) {
         <span className="check-icon">&#10003;</span>
       </button>
       <div className="task-content">
-        <div className="task-text">{task.text}</div>
+        <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`}>
+          {task.text}
+          {isOverdue && daysOver > 0 && (
+            <span className="overdue-ago"> ({daysOver === 1 ? '1 day ago' : `${daysOver} days ago`})</span>
+          )}
+        </div>
         <div className="task-meta">
-          {!isSubtask && <span className="task-bucket">{task.bucket}</span>}
+          {!isSubtask && (
+            <span
+              className="task-bucket"
+              style={{ background: `${bucketColor}20`, color: bucketColor }}
+            >
+              {task.bucket}
+            </span>
+          )}
+          {!isSubtask && dueDateLabel && (
+            <span className="task-due-chip" style={{ color: dueDateLabel.color }}>
+              {dueDateLabel.text}
+            </span>
+          )}
           {task.priority !== 'normal' && (
             <span className={`task-priority ${task.priority}`}>
               {task.priority}
