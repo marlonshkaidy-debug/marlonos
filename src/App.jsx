@@ -25,6 +25,7 @@ function App() {
   const [activeNav, setActiveNav] = useState('tasks') // 'tasks' | 'lists'
   const [overdueCollapsed, setOverdueCollapsed] = useState(false)
   const [upcomingCollapsed, setUpcomingCollapsed] = useState(false)
+  const [completedCollapsed, setCompletedCollapsed] = useState(true)
 
   const micPermission = useMicPermission()
   const { isRecording, audioBlob, error: recorderError, startRecording, stopRecording } = useVoiceRecorder()
@@ -121,14 +122,15 @@ function App() {
   }, [tasks, activeBucket])
 
   // Three-layer grouping
-  const { overdueTasks, todayTasks, upcomingGroups } = useMemo(() => {
+  const { overdueTasks, todayTasks, upcomingGroups, completedTasks } = useMemo(() => {
     const overdue = []
     const today = []
     const upcoming = []
+    const completed = []
 
     for (const task of filteredTasks) {
       if (task.status === 'completed') {
-        today.push(task) // completed tasks go to today section
+        completed.push(task)
         continue
       }
       const section = getDateSection(task.dueDate, task.status)
@@ -142,9 +144,6 @@ function App() {
 
     // Sort today by priority
     today.sort((a, b) => {
-      const aComp = a.status === 'completed'
-      const bComp = b.status === 'completed'
-      if (aComp !== bComp) return aComp ? 1 : -1
       const aPri = PRIORITY_ORDER[a.priority] ?? 2
       const bPri = PRIORITY_ORDER[b.priority] ?? 2
       return aPri - bPri
@@ -175,7 +174,7 @@ function App() {
 
     const groups = groupOrder.map((name) => ({ name, tasks: groupMap.get(name) }))
 
-    return { overdueTasks: overdue, todayTasks: today, upcomingGroups: groups }
+    return { overdueTasks: overdue, todayTasks: today, upcomingGroups: groups, completedTasks: completed }
   }, [filteredTasks])
 
   const handleSubmit = async (e) => {
@@ -323,6 +322,29 @@ function App() {
                               />
                             ))}
                           </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* COMPLETED Section */}
+                  {completedTasks.length > 0 && (
+                    <div className="task-section">
+                      <button
+                        className="section-header section-completed"
+                        onClick={() => setCompletedCollapsed((c) => !c)}
+                      >
+                        <span className="section-title">COMPLETED ({completedTasks.length})</span>
+                        <span className={`section-chevron ${completedCollapsed ? '' : 'expanded'}`}>&#9660;</span>
+                      </button>
+                      <div className={`section-body ${completedCollapsed ? 'collapsed' : ''}`}>
+                        {completedTasks.map((task) => (
+                          <ParentTaskCard
+                            key={task.id}
+                            task={task}
+                            subtasks={subtaskMap[task.id] || []}
+                            onComplete={complete}
+                          />
                         ))}
                       </div>
                     </div>

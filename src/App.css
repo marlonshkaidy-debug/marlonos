@@ -132,6 +132,10 @@ button.section-header:hover {
   color: #6B7280;
 }
 
+.section-completed .section-title {
+  color: #6B7280;
+}
+
 .section-chevron {
   font-size: 10px;
   color: var(--text-muted);

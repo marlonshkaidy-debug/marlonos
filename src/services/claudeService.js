@@ -6,7 +6,94 @@ const client = new Anthropic({
   dangerouslyAllowBrowser: true,
 })
 
-function buildSystemPrompt(memoryContext) {
+function getChicagoDateContext() {
+  const now = new Date()
+  const tz = userConfig.timeZone
+  const pad = (n) => String(n).padStart(2, '0')
+
+  const chicagoYMD = now.toLocaleDateString('en-CA', { timeZone: tz })
+  const [y, m, d] = chicagoYMD.split('-').map(Number)
+  const chicagoToday = new Date(y, m - 1, d)
+  const dow = chicagoToday.getDay()
+
+  const fmtYMD = (dt) =>
+    `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+  const dayLabel = (dt) =>
+    dt.toLocaleDateString('en-US', { weekday: 'long' })
+  const dateLabel = (dt) =>
+    dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+
+  const dayName = dayLabel(chicagoToday)
+  const monthName = chicagoToday.toLocaleDateString('en-US', { month: 'long' })
+  const timeStr = now.toLocaleTimeString('en-US', {
+    timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true,
+  })
+
+  const tomorrow = new Date(chicagoToday)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  // Next occurrence of a weekday (same day = next week)
+  const nextDow = (target) => {
+    let diff = (target - dow + 7) % 7
+    if (diff === 0) diff = 7
+    const dt = new Date(chicagoToday)
+    dt.setDate(dt.getDate() + diff)
+    return dt
+  }
+
+  // This weekend = next Saturday, or today if already Sat/Sun
+  let thisWeekend
+  if (dow === 6) thisWeekend = new Date(chicagoToday)
+  else if (dow === 0) thisWeekend = new Date(chicagoToday)
+  else {
+    thisWeekend = new Date(chicagoToday)
+    thisWeekend.setDate(thisWeekend.getDate() + (6 - dow))
+  }
+
+  const nextMon = nextDow(1)
+  const nextFri = nextDow(5)
+  const nextSun = nextDow(0)
+
+  // Compute Chicago ISO with timezone offset
+  const isoParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(now)
+  const iGet = (type) => isoParts.find((p) => p.type === type)?.value
+  let isoH = iGet('hour')
+  if (isoH === '24') isoH = '00'
+  const isoStr = `${iGet('year')}-${iGet('month')}-${iGet('day')}T${isoH}:${iGet('minute')}:${iGet('second')}`
+  const chicagoMs = Date.UTC(
+    +iGet('year'), +iGet('month') - 1, +iGet('day'),
+    +isoH, +iGet('minute'), +iGet('second')
+  )
+  const offsetMin = Math.round((chicagoMs - now.getTime()) / 60000)
+  const offSign = offsetMin >= 0 ? '+' : '-'
+  const offH = pad(Math.floor(Math.abs(offsetMin) / 60))
+  const offM = pad(Math.abs(offsetMin) % 60)
+  const offset = `${offSign}${offH}:${offM}`
+
+  return {
+    headerLine: `CURRENT DATETIME: ${dayName}, ${monthName} ${d}, ${y} at ${timeStr} CST. Tomorrow is ${dayLabel(tomorrow)}. This week ends on Sunday ${dateLabel(nextSun)}. This Friday is ${dateLabel(nextFri)}.`,
+    dateResolution: `DATE RESOLUTION — use ONLY these pre-computed dates, never calculate your own:
+- Today: ${fmtYMD(chicagoToday)} (${dayName})
+- Tomorrow: ${fmtYMD(tomorrow)} (${dayLabel(tomorrow)})
+- This weekend: ${fmtYMD(thisWeekend)} (${dayLabel(thisWeekend)})
+- Monday / next Monday: ${fmtYMD(nextMon)}
+- Friday / by Friday / end of week: ${fmtYMD(nextFri)}
+- Next week: starts ${fmtYMD(nextMon)}
+- "in X days": add X to today's date ${fmtYMD(chicagoToday)}
+- For any named day (e.g. "Tuesday", "Saturday"): use the NEXT occurrence after today
+- dueDate must always be YYYY-MM-DD format
+- scheduledTime must always include the timezone offset ${offset}`,
+    iso: `${isoStr}${offset}`,
+    offset,
+  }
+}
+
+function buildSystemPrompt(memoryContext, dateContext) {
   const { appName, userName, defaultBuckets, priorityRules } = userConfig
 
   const bucketLines = defaultBuckets
@@ -36,7 +123,11 @@ MEMORY RULES:
 `
   }
 
-  return `You are ${appName}, a personal life organizer for ${userName}. You parse natural language input and return structured JSON to manage tasks.
+  return `${dateContext.headerLine}
+
+${dateContext.dateResolution}
+
+You are ${appName}, a personal life organizer for ${userName}. You parse natural language input and return structured JSON to manage tasks.
 
 ${userName}'s life buckets:
 ${bucketLines}
@@ -48,10 +139,10 @@ Personal family tasks (e.g. picking up kids, dance, school drop-offs, errands) s
 mustDoToday: Only set to true if user explicitly says "must do today", "has to happen today", or "before I leave today". Do not infer mustDoToday from context alone.
 
 scheduledTime: Only extract a time if the user explicitly states a specific time (e.g. "at 4:30", "at 5pm", "5:45 PM"). Do not infer or guess times. If no specific time is stated, set scheduledTime to null.
-When the user says a time WITHOUT AM/PM: default to PM for times 1:00–7:59 (e.g. "at 4:30" = 4:30 PM, "5:45" = 5:45 PM). Default to AM for times 8:00–11:59 (e.g. "at 9:00" = 9:00 AM). Return scheduledTime as a full ISO 8601 timestamp using today's date, the correct local time, AND the timezone offset provided in the current date/time below. Example: if current time is "2026-03-18T12:00:00-05:00", then "at 4:30" should return "2026-03-18T16:30:00-05:00". ALWAYS include the timezone offset — never return a bare datetime or UTC (Z) suffix.
+When the user says a time WITHOUT AM/PM: default to PM for times 1:00–7:59 (e.g. "at 4:30" = 4:30 PM, "5:45" = 5:45 PM). Default to AM for times 8:00–11:59 (e.g. "at 9:00" = 9:00 AM). Return scheduledTime as a full ISO 8601 timestamp using the task's due date, the correct local time, AND the timezone offset ${dateContext.offset}. ALWAYS include the timezone offset — never return a bare datetime or UTC (Z) suffix.
 
 Auto-assign each task to the most appropriate bucket based on context.
-Parse date references into dueDate (YYYY-MM-DD format).
+Parse date references into dueDate (YYYY-MM-DD format). Use ONLY the pre-computed dates from DATE RESOLUTION above — never guess or calculate dates yourself.
 ${memoryBlock}
 SUBTASK DETECTION — CRITICAL RULES:
 Use subtaskGroups (NOT newTasks) whenever the user provides multiple related items that belong under one umbrella. This includes:
@@ -72,6 +163,12 @@ EXAMPLES:
   → These are UNRELATED tasks, so they go in newTasks as individual items, NOT subtaskGroups.
 
 RULE: If tasks share a common subject/person/project/context, they MUST go into subtaskGroups. Only use newTasks for standalone, unrelated tasks. When in doubt, prefer subtaskGroups over flat newTasks.
+
+APPEND TO EXISTING PARENT TASK:
+If the user says "add to [name]'s tasks", "add another task for [name]", "add to the [task name]", "also for [name]...", or similar phrases indicating they want to add subtasks to an EXISTING parent task (one already in their current task list), use appendToParent instead of subtaskGroups.
+- Set parentIdentifier to a string that partially matches the existing parent task's text (case-insensitive).
+- Set newSubtasks to the array of new subtasks to add under that parent.
+- Do NOT create a new parent via subtaskGroups when the user clearly wants to add to an existing one.
 
 DYNAMIC BUCKET CREATION:
 If the user says phrases like "add a bucket for...", "create a new category for...", "add a new section for...", "I need a bucket called...", or "add [name] as a category", include the new bucket in the newBuckets array.
@@ -129,13 +226,15 @@ Always respond with valid JSON in this exact structure:
     { "bucketName": "new bucket name", "context": "what this bucket is for" }
   ],
   "deleteBucket": null,
+  "appendToParent": null,
   "navigation": null
 }
 
 deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed": true/false }
+appendToParent, when present, should be: { "parentIdentifier": "partial match of existing parent task text", "newSubtasks": [{ "text": "subtask description", "priority": "normal" }] }
 navigation, when present, should be: "tasks" or "lists"
 
-If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket and navigation default to null.
+If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, and navigation default to null.
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
 }
@@ -145,33 +244,20 @@ export async function parseInput(text, currentTasks, memoryContext) {
     .filter((t) => t.status === 'active')
     .map(
       (t) =>
-        `- [${t.priority}] ${t.text} (${t.bucket})${t.scheduledTime ? ' @ ' + t.scheduledTime : ''}`
+        `- [${t.priority}]${t.is_parent ? ' [PARENT]' : ''} ${t.text} (${t.bucket})${t.scheduledTime ? ' @ ' + t.scheduledTime : ''}`
     )
     .join('\n')
 
-  // Send local time with timezone offset (not UTC) so Claude returns correct local timestamps
-  const now = new Date()
-  const offset = -now.getTimezoneOffset()
-  const sign = offset >= 0 ? '+' : '-'
-  const pad = (n) => String(Math.abs(n)).padStart(2, '0')
-  const localISO =
-    now.getFullYear() +
-    '-' + pad(now.getMonth() + 1) +
-    '-' + pad(now.getDate()) +
-    'T' + pad(now.getHours()) +
-    ':' + pad(now.getMinutes()) +
-    ':' + pad(now.getSeconds()) +
-    sign + pad(Math.floor(Math.abs(offset) / 60)) +
-    ':' + pad(Math.abs(offset) % 60)
+  const dateContext = getChicagoDateContext()
 
-  const userMessage = `Current date/time: ${localISO}
+  const userMessage = `Current date/time: ${dateContext.iso}
 
 Current active tasks:
 ${taskSummary || '(none)'}
 
 User input: "${text}"`
 
-  const systemPrompt = buildSystemPrompt(memoryContext)
+  const systemPrompt = buildSystemPrompt(memoryContext, dateContext)
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',

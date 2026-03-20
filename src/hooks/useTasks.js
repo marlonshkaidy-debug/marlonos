@@ -119,6 +119,58 @@ export function useTasks() {
         console.log('[DIAG] No subtaskGroups to process (length:', result.subtaskGroups?.length, ')')
       }
 
+      // Process appendToParent: add subtasks to existing parent
+      if (result.appendToParent) {
+        const { parentIdentifier, newSubtasks } = result.appendToParent
+        if (parentIdentifier && newSubtasks?.length) {
+          const parentMatch = tasks.find(
+            (t) =>
+              t.is_parent &&
+              t.status === 'active' &&
+              t.text.toLowerCase().includes(parentIdentifier.toLowerCase())
+          )
+          if (parentMatch) {
+            const existingSubs = tasks.filter(
+              (t) => t.parent_task_id === parentMatch.id
+            )
+            let order = existingSubs.length
+            for (const sub of newSubtasks) {
+              const saved = await taskService.addSubtask(
+                {
+                  text: sub.text,
+                  bucket: parentMatch.bucket,
+                  priority: sub.priority || 'normal',
+                },
+                parentMatch.id,
+                order++
+              )
+              createdTaskIds.push(saved.id)
+            }
+          } else {
+            // No matching parent found — create new parent with subtasks
+            const newParent = await taskService.addParentTask({
+              text: parentIdentifier,
+              bucket: 'Home / Personal',
+              priority: 'normal',
+            })
+            createdTaskIds.push(newParent.id)
+            let order = 0
+            for (const sub of newSubtasks) {
+              const saved = await taskService.addSubtask(
+                {
+                  text: sub.text,
+                  bucket: newParent.bucket,
+                  priority: sub.priority || 'normal',
+                },
+                newParent.id,
+                order++
+              )
+              createdTaskIds.push(saved.id)
+            }
+          }
+        }
+      }
+
       // Add new tasks (regular, non-subtask)
       if (result.newTasks?.length) {
         for (const task of result.newTasks) {
