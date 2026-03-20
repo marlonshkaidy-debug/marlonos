@@ -104,6 +104,12 @@ function buildSystemPrompt(memoryContext, dateContext) {
     .map(([level, rule]) => `- ${level}: ${rule}`)
     .join('\n')
 
+  // Inject personal vocabulary
+  const vocab = userConfig.personalVocabulary
+  const vocabLines = Object.entries(vocab)
+    .map(([term, def]) => `- ${term}: ${def}`)
+    .join('\n')
+
   let memoryBlock = ''
   if (memoryContext && memoryContext.length > 0) {
     const memoryLines = memoryContext
@@ -129,6 +135,10 @@ ${dateContext.dateResolution}
 
 You are ${appName}, a personal life organizer for ${userName}. You parse natural language input and return structured JSON to manage tasks.
 
+PERSONAL VOCABULARY & KNOWN PEOPLE:
+${vocabLines}
+Use this vocabulary to correctly interpret abbreviations, names, and domain-specific terms in ${userName}'s speech. When Whisper transcription may have mangled a term, match it to the closest vocabulary entry.
+
 ${userName}'s life buckets:
 ${bucketLines}
 
@@ -141,9 +151,30 @@ mustDoToday: Only set to true if user explicitly says "must do today", "has to h
 scheduledTime: Only extract a time if the user explicitly states a specific time (e.g. "at 4:30", "at 5pm", "5:45 PM"). Do not infer or guess times. If no specific time is stated, set scheduledTime to null.
 When the user says a time WITHOUT AM/PM: default to PM for times 1:00–7:59 (e.g. "at 4:30" = 4:30 PM, "5:45" = 5:45 PM). Default to AM for times 8:00–11:59 (e.g. "at 9:00" = 9:00 AM). Return scheduledTime as a full ISO 8601 timestamp using the task's due date, the correct local time, AND the timezone offset ${dateContext.offset}. ALWAYS include the timezone offset — never return a bare datetime or UTC (Z) suffix.
 
+CONFIDENCE / AMBIGUITY:
+For each task in newTasks and each subtaskGroup, include a "confidence" field: "high", "medium", or "low".
+- "high" (default): you are confident about the bucket assignment and priority.
+- "medium": the bucket or priority is a reasonable guess but could be wrong.
+- "low": you are genuinely uncertain — the input is ambiguous.
+Only use medium/low when genuinely uncertain. Most tasks should be "high".
+
 Auto-assign each task to the most appropriate bucket based on context.
 Parse date references into dueDate (YYYY-MM-DD format). Use ONLY the pre-computed dates from DATE RESOLUTION above — never guess or calculate dates yourself.
 ${memoryBlock}
+VOICE CORRECTION PROTOCOL:
+Detect correction intents in user input. If the user is correcting a previous action rather than creating a new task, set voiceCorrection instead of newTasks.
+Correction triggers:
+- "that's wrong, redo it" / "redo that" → type: "redo" (wipe last input, re-prompt)
+- "never mind that last one" / "cancel that" / "ignore that" → type: "cancel" (delete most recently added tasks)
+- "actually [correction]" → type: "amend", value: the corrected text/field
+- "change that to [value]" → type: "amend", value: the new value
+- "make that [priority] priority" → type: "priority", value: the priority level
+- "that belongs in [bucket]" → type: "bucket", value: the bucket name
+- "move that to [date]" → type: "reschedule", value: "YYYY-MM-DD"
+
+VOCABULARY MANAGEMENT:
+If the user says "add to my vocabulary: [term] means [definition]" or similar, set vocabularyUpdate with the term and definition.
+
 SUBTASK DETECTION — CRITICAL RULES:
 Use subtaskGroups (NOT newTasks) whenever the user provides multiple related items that belong under one umbrella. This includes:
 1. Explicit grouping: "for [person/project], I need to do X, Y, Z" — the person/project becomes the parent, X/Y/Z become subtasks.
@@ -179,10 +210,16 @@ If the user says "delete the [bucket name] bucket", "remove the [bucket name] bu
 - Set "confirmed" to false initially. If the user says "confirm" in the context of a pending bucket deletion, set "confirmed" to true.
 - Default buckets (Work / Advisory, Coaching, Home / Personal, Ventures) CANNOT be deleted. If the user tries, set response to "That's a default bucket and cannot be deleted" and leave deleteBucket as null.
 
-NAVIGATION:
-If the user says "go to lists", "show me my lists", "open lists", "switch to lists" → set navigation to "lists".
-If the user says "go to tasks", "show me my tasks", "open tasks", "switch to tasks" → set navigation to "tasks".
-Otherwise set navigation to null.
+NAVIGATION & SEARCH:
+Detect navigation, filtering, and search intents. Set navigationIntent when the user wants to navigate, filter, or search.
+- "go to lists" / "show me my lists" / "open lists" → action: "navigate", target: "lists"
+- "go to tasks" / "show me my tasks" / "back to tasks" → action: "navigate", target: "tasks"
+- "show me my [bucket] list" / "show me [bucket] tasks" → action: "filter", target: "tasks", filter: "[bucket name]"
+- "show me everything" / "show all" → action: "filter", target: "tasks", filter: "all"
+- "show me overdue" → action: "filter", target: "tasks", filter: "overdue"
+- "show me upcoming" → action: "filter", target: "tasks", filter: "upcoming"
+- "find [term]" / "search for [term]" / "show me [person] tasks" → action: "search", filter: "[term]"
+Also still set the legacy "navigation" field for basic "tasks"/"lists" navigation for backward compatibility.
 
 Always respond with valid JSON in this exact structure:
 {
@@ -191,6 +228,7 @@ Always respond with valid JSON in this exact structure:
       "text": "task description",
       "bucket": "bucket name",
       "priority": "critical|high|normal|low",
+      "confidence": "high|medium|low",
       "mustDoToday": true/false,
       "scheduledTime": "ISO datetime or null",
       "dueDate": "YYYY-MM-DD or null"
@@ -217,6 +255,7 @@ Always respond with valid JSON in this exact structure:
       "parentText": "parent task description",
       "bucket": "bucket name",
       "priority": "critical|high|normal|low",
+      "confidence": "high|medium|low",
       "subtasks": [
         { "text": "subtask description", "priority": "normal" }
       ]
@@ -227,14 +266,20 @@ Always respond with valid JSON in this exact structure:
   ],
   "deleteBucket": null,
   "appendToParent": null,
-  "navigation": null
+  "navigation": null,
+  "navigationIntent": null,
+  "voiceCorrection": null,
+  "vocabularyUpdate": null
 }
 
 deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed": true/false }
 appendToParent, when present, should be: { "parentIdentifier": "partial match of existing parent task text", "newSubtasks": [{ "text": "subtask description", "priority": "normal" }] }
 navigation, when present, should be: "tasks" or "lists"
+navigationIntent, when present, should be: { "action": "navigate|filter|search", "target": "tasks|lists", "filter": "bucket name or search term or null" }
+voiceCorrection, when present, should be: { "type": "redo|cancel|amend|priority|bucket|reschedule", "targetDescription": "description of what is being corrected", "action": "what to do", "value": "the new value if applicable" }
+vocabularyUpdate, when present, should be: { "term": "the term", "definition": "the definition" }
 
-If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, and navigation default to null.
+If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, navigation, navigationIntent, voiceCorrection, and vocabularyUpdate default to null.
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
 }

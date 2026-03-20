@@ -22,6 +22,7 @@ export async function addTask(task) {
       scheduledTime: task.scheduledTime || null,
       dueDate: task.dueDate || new Date().toISOString().split('T')[0],
       status: 'active',
+      confidence: task.confidence || 'high',
     })
     .select()
     .single()

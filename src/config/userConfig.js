@@ -1,5 +1,45 @@
 const CUSTOM_BUCKETS_KEY = 'marlonos_custom_buckets'
 const BUCKET_COLORS_KEY = 'marlonos_bucket_colors'
+const VOCABULARY_KEY = 'marlonos_vocabulary'
+
+// --- Personal Vocabulary ---
+const baseVocabulary = {
+  'IDI': 'Individual Disability Insurance — work/advisory context',
+  'e-money': 'financial planning software used for client files',
+  'AOR': 'Agent of Record transfer',
+  'CE': 'Continuing Education requirement',
+  'Principal': 'insurance/financial company',
+  'American National': 'insurance company',
+  'Mutual of Omaha': 'insurance company',
+  'SmartAsset': 'lead generation platform',
+  'POA': 'Power of Attorney',
+  'PWA': 'Progressive Web App — ventures/tech context',
+  '7v7': 'touch football coaching event',
+  'Damien': 'business partner — Work/Advisory',
+  'Sierra': 'junior advisor — Work/Advisory',
+  'Cassidy': 'junior advisor — Work/Advisory',
+  'Linda': 'wife\'s aunt, POA Tasks bucket',
+  'Olivia': 'daughter — Home/Personal',
+  'Noah': 'son — Home/Personal',
+}
+
+function loadCustomVocabulary() {
+  try {
+    const stored = localStorage.getItem(VOCABULARY_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch (err) {
+    console.error('[UserConfig] Failed to load custom vocabulary:', err)
+  }
+  return {}
+}
+
+function saveCustomVocabulary(vocab) {
+  try {
+    localStorage.setItem(VOCABULARY_KEY, JSON.stringify(vocab))
+  } catch (err) {
+    console.error('[UserConfig] Failed to save custom vocabulary:', err)
+  }
+}
 
 function loadCustomBuckets() {
   try {
@@ -152,6 +192,23 @@ const userConfig = {
 
   isDefaultBucket(bucketName) {
     return BASE_BUCKET_NAMES.includes(bucketName.toLowerCase())
+  },
+
+  // --- Personal Vocabulary API ---
+  get personalVocabulary() {
+    return { ...baseVocabulary, ...loadCustomVocabulary() }
+  },
+
+  addVocabularyTerm(term, definition) {
+    const custom = loadCustomVocabulary()
+    custom[term] = definition
+    saveCustomVocabulary(custom)
+  },
+
+  removeVocabularyTerm(term) {
+    const custom = loadCustomVocabulary()
+    delete custom[term]
+    saveCustomVocabulary(custom)
   },
 }
 

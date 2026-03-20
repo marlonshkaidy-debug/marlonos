@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import * as taskService from '../services/taskService'
 import * as memoryService from '../services/memoryService'
 import { parseInput } from '../services/claudeService'
@@ -12,6 +12,10 @@ export function useTasks() {
   const [bucketVersion, setBucketVersion] = useState(0)
   const [pendingDeleteBucket, setPendingDeleteBucket] = useState(null)
   const [navigationTarget, setNavigationTarget] = useState(null)
+  const [navigationIntent, setNavigationIntent] = useState(null)
+  const [searchTerm, setSearchTerm] = useState(null)
+  const [reRecordRequested, setReRecordRequested] = useState(false)
+  const lastAddedTaskIds = useRef([])
 
   const refresh = useCallback(async () => {
     try {
@@ -55,6 +59,69 @@ export function useTasks() {
       const transcriptPromise = logTranscript(rawTranscript, result)
 
       const createdTaskIds = []
+
+      // === VOICE CORRECTION PROTOCOL ===
+      if (result.voiceCorrection) {
+        const vc = result.voiceCorrection
+        console.log('[VoiceCorrection] type:', vc.type, '| value:', vc.value)
+
+        if (vc.type === 'redo') {
+          lastAddedTaskIds.current = []
+          setReRecordRequested(true)
+          await refresh()
+          return result.response || 'Go ahead, re-record your input.'
+        }
+
+        if (vc.type === 'cancel') {
+          if (lastAddedTaskIds.current.length > 0) {
+            for (const id of lastAddedTaskIds.current) {
+              try {
+                await taskService.deleteTask(id)
+              } catch (err) {
+                console.error('[VoiceCorrection] Failed to delete task:', id, err)
+              }
+            }
+            lastAddedTaskIds.current = []
+          }
+          await refresh()
+          return result.response || 'Done — cancelled the last tasks.'
+        }
+
+        if (['amend', 'priority', 'bucket', 'reschedule'].includes(vc.type)) {
+          const lastId = lastAddedTaskIds.current[lastAddedTaskIds.current.length - 1]
+          if (lastId) {
+            const updates = {}
+            if (vc.type === 'amend') updates.text = vc.value
+            if (vc.type === 'priority') updates.priority = vc.value
+            if (vc.type === 'bucket') {
+              updates.bucket = vc.value
+              // Trigger memory spine update for bucket correction
+              const lastTask = tasks.find((t) => t.id === lastId)
+              if (lastTask) {
+                // Extract entity from task text for memory confirmation
+                memoryService.confirmEntity(lastTask.text, vc.value).catch(() => {})
+              }
+            }
+            if (vc.type === 'reschedule') updates.dueDate = vc.value
+            try {
+              await taskService.updateTask(lastId, updates)
+            } catch (err) {
+              console.error('[VoiceCorrection] Failed to update task:', lastId, err)
+            }
+          }
+          await refresh()
+          return result.response || 'Updated.'
+        }
+      }
+
+      // === VOCABULARY UPDATE ===
+      if (result.vocabularyUpdate) {
+        const { term, definition } = result.vocabularyUpdate
+        if (term && definition) {
+          userConfig.addVocabularyTerm(term, definition)
+          console.log('[Vocabulary] Added:', term, '→', definition)
+        }
+      }
 
       // Process newBuckets: add dynamic buckets at runtime
       if (result.newBuckets?.length) {
@@ -174,7 +241,10 @@ export function useTasks() {
       // Add new tasks (regular, non-subtask)
       if (result.newTasks?.length) {
         for (const task of result.newTasks) {
-          const saved = await taskService.addTask(task)
+          const saved = await taskService.addTask({
+            ...task,
+            confidence: task.confidence || 'high',
+          })
           createdTaskIds.push(saved.id)
         }
       }
@@ -245,9 +315,19 @@ export function useTasks() {
         }
       }
 
-      // Process navigation
+      // Process navigation (legacy)
       if (result.navigation) {
         setNavigationTarget(result.navigation)
+      }
+
+      // Process extended navigationIntent
+      if (result.navigationIntent) {
+        setNavigationIntent(result.navigationIntent)
+      }
+
+      // Track last added task IDs for voice correction
+      if (createdTaskIds.length > 0) {
+        lastAddedTaskIds.current = createdTaskIds
       }
 
       // Update last_referenced for all entities mentioned in memory
@@ -288,6 +368,24 @@ export function useTasks() {
     [tasks, refresh]
   )
 
+  // --- Navigation & Search helpers ---
+  const navigate = useCallback((destination) => {
+    setNavigationTarget(destination)
+  }, [])
+
+  const filterTo = useCallback((bucket) => {
+    setSearchTerm(null)
+    setNavigationIntent({ action: 'filter', target: 'tasks', filter: bucket })
+  }, [])
+
+  const searchFor = useCallback((term) => {
+    setSearchTerm(term)
+  }, [])
+
+  const clearSearch = useCallback(() => {
+    setSearchTerm(null)
+  }, [])
+
   return {
     tasks,
     loading,
@@ -299,5 +397,15 @@ export function useTasks() {
     setPendingDeleteBucket,
     navigationTarget,
     setNavigationTarget,
+    navigationIntent,
+    setNavigationIntent,
+    searchTerm,
+    setSearchTerm,
+    reRecordRequested,
+    setReRecordRequested,
+    navigate,
+    filterTo,
+    searchFor,
+    clearSearch,
   }
 }

@@ -16,6 +16,9 @@ function App() {
     tasks, loading, addFromText, complete, bucketVersion,
     pendingDeleteBucket, setPendingDeleteBucket,
     navigationTarget, setNavigationTarget,
+    navigationIntent, setNavigationIntent,
+    searchTerm, setSearchTerm, clearSearch,
+    reRecordRequested, setReRecordRequested,
   } = useTasks()
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -32,13 +35,62 @@ function App() {
   const addFromTextRef = useRef(addFromText)
   const pendingTranscription = useRef(false)
 
-  // Handle voice navigation from Claude
+  // Handle voice navigation from Claude (legacy)
   useEffect(() => {
     if (navigationTarget) {
       setActiveNav(navigationTarget)
       setNavigationTarget(null)
     }
   }, [navigationTarget, setNavigationTarget])
+
+  // Handle extended navigationIntent from Claude
+  useEffect(() => {
+    if (!navigationIntent) return
+    const { action, target, filter } = navigationIntent
+
+    if (action === 'navigate') {
+      setActiveNav(target || 'tasks')
+    } else if (action === 'filter') {
+      setActiveNav('tasks')
+      if (filter === 'all') {
+        setActiveBucket(ALL_FILTER)
+        setSearchTerm(null)
+      } else if (filter === 'overdue') {
+        setActiveBucket(ALL_FILTER)
+        setSearchTerm(null)
+        // Expand overdue section
+        setOverdueCollapsed(false)
+      } else if (filter === 'upcoming') {
+        setActiveBucket(ALL_FILTER)
+        setSearchTerm(null)
+        setUpcomingCollapsed(false)
+      } else if (filter) {
+        // Match bucket name (case-insensitive)
+        const matchedBucket = bucketNames.find(
+          (b) => b.toLowerCase() === filter.toLowerCase()
+        )
+        if (matchedBucket) {
+          setActiveBucket(matchedBucket)
+        }
+        setSearchTerm(null)
+      }
+    } else if (action === 'search') {
+      setActiveNav('tasks')
+      setActiveBucket(ALL_FILTER)
+      setSearchTerm(filter || null)
+    }
+
+    setNavigationIntent(null)
+  }, [navigationIntent, setNavigationIntent, bucketNames, setSearchTerm])
+
+  // Handle re-record request from voice correction
+  useEffect(() => {
+    if (reRecordRequested && !isRecording && !sending) {
+      setReRecordRequested(false)
+      setVoiceStatus('recording')
+      startRecording()
+    }
+  }, [reRecordRequested, isRecording, sending, setReRecordRequested, startRecording])
 
   // Reactively compute bucket names from userConfig
   const bucketNames = useMemo(
@@ -114,12 +166,18 @@ function App() {
     }
   }
 
-  // Filter tasks: exclude subtasks from top-level
+  // Filter tasks: exclude subtasks from top-level, apply bucket + search
   const filteredTasks = useMemo(() => {
-    const topLevel = tasks.filter((t) => !t.parent_task_id)
-    if (activeBucket === ALL_FILTER) return topLevel
-    return topLevel.filter((t) => t.bucket === activeBucket)
-  }, [tasks, activeBucket])
+    let topLevel = tasks.filter((t) => !t.parent_task_id)
+    if (activeBucket !== ALL_FILTER) {
+      topLevel = topLevel.filter((t) => t.bucket === activeBucket)
+    }
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      topLevel = topLevel.filter((t) => t.text.toLowerCase().includes(term))
+    }
+    return topLevel
+  }, [tasks, activeBucket, searchTerm])
 
   // Three-layer grouping
   const { overdueTasks, todayTasks, upcomingGroups, completedTasks } = useMemo(() => {
@@ -215,7 +273,16 @@ function App() {
     <>
       {/* Top Bar */}
       <div className="top-bar">
-        <h1>{userConfig.appName}</h1>
+        <div className="top-bar-row">
+          <h1>{userConfig.appName}</h1>
+          <div className={`mic-indicator ${micPermission}`} title={`Mic: ${micPermission}`}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="1" width="6" height="12" rx="3" />
+              <path d="M5 10a7 7 0 0 0 14 0" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </div>
+        </div>
         <div className="date">{today}</div>
       </div>
 
@@ -243,6 +310,14 @@ function App() {
                 </button>
               ))}
             </div>
+
+            {/* Search Indicator */}
+            {searchTerm && (
+              <div className="search-indicator">
+                <span>Searching: {searchTerm}</span>
+                <button className="search-clear" onClick={clearSearch}>&times;</button>
+              </div>
+            )}
 
             {/* Three-Layer Task List */}
             <div className="task-list">
@@ -480,6 +555,7 @@ function App() {
 function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
   const [expanded, setExpanded] = useState(false)
   const isParent = task.is_parent && subtasks.length > 0
+  const hasLowConfidence = task.confidence === 'medium' || task.confidence === 'low'
 
   if (!isParent) {
     return <TaskCard task={task} onComplete={onComplete} isOverdue={isOverdue} />
@@ -511,6 +587,7 @@ function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
         <div className="task-content">
           <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`}>
             {task.text}
+            {hasLowConfidence && <span className="confidence-dot" title="Low confidence assignment">●</span>}
             <span className="subtask-progress">
               ({completedCount}/{totalCount})
             </span>
@@ -551,6 +628,7 @@ function TaskCard({ task, onComplete, isSubtask = false, isOverdue = false }) {
   const isCritical = task.priority === 'critical'
   const isMustDo = task.mustDoToday
   const isCompleted = task.status === 'completed'
+  const hasLowConfidence = task.confidence === 'medium' || task.confidence === 'low'
 
   const classes = [
     'task-card',
@@ -579,6 +657,7 @@ function TaskCard({ task, onComplete, isSubtask = false, isOverdue = false }) {
       <div className="task-content">
         <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`}>
           {task.text}
+          {hasLowConfidence && <span className="confidence-dot" title="Low confidence assignment">●</span>}
           {isOverdue && daysOver > 0 && (
             <span className="overdue-ago"> ({daysOver === 1 ? '1 day ago' : `${daysOver} days ago`})</span>
           )}

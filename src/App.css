@@ -8,6 +8,12 @@
   z-index: 10;
 }
 
+.top-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .top-bar h1 {
   font-size: 20px;
   font-weight: 600;
@@ -20,6 +26,34 @@
   font-size: 13px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+/* ── Mic Permission Indicator ── */
+.mic-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  transition: color 0.2s ease;
+}
+
+.mic-indicator.granted {
+  color: #4caf50;
+}
+
+.mic-indicator.requesting {
+  color: #EAB308;
+  animation: pulse 1.2s infinite;
+}
+
+.mic-indicator.denied {
+  color: #DC2626;
+}
+
+.mic-indicator.unknown {
+  color: var(--text-muted);
 }
 
 /* ── Mic Permission Denied Banner ── */
@@ -704,4 +738,40 @@ button.section-header:hover {
   0% { background: transparent; }
   50% { background: rgba(76, 175, 80, 0.1); }
   100% { background: transparent; }
+}
+
+/* ── Search Indicator ── */
+.search-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.search-clear {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* ── Confidence Dot (Ambiguity Indicator) ── */
+.confidence-dot {
+  color: #EAB308;
+  font-size: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+  cursor: default;
 }
