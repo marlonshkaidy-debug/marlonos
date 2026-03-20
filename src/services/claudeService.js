@@ -221,12 +221,22 @@ Detect navigation, filtering, and search intents. Set navigationIntent when the 
 - "find [term]" / "search for [term]" / "show me [person] tasks" → action: "search", filter: "[term]"
 Also still set the legacy "navigation" field for basic "tasks"/"lists" navigation for backward compatibility.
 
-LIST MANAGEMENT:
+LIST MANAGEMENT — HIGHEST PRIORITY INTENT:
+The word "list" in user input is the PRIMARY trigger for listIntent. If the user's input contains the word "list" and they are talking about a list object (grocery list, packing list, shopping list, gear list, etc.), you MUST set listIntent and MUST leave newTasks as an empty array []. listIntent and newTasks are MUTUALLY EXCLUSIVE when the input is about lists.
+
+CRITICAL RULES:
+- "Create a [name] list" / "new [name] list" / "start a [name] list" → ALWAYS listIntent CREATE, NEVER newTasks
+- "Add [items] to my [name] list" → ALWAYS listIntent ADD, NEVER newTasks
+- "Show me my [name] list" / "pull up [name] list" / "what's on my [name] list" → ALWAYS listIntent VIEW, NEVER newTasks
+- "[name] list done" / "done with [name] list" / "mark [name] list done" / "finished the [name] list" / "finished [name] list" → ALWAYS listIntent DONE, NEVER newTasks
+- Any phrase ending in "list" that refers to a checklist/shopping list/packing list → ALWAYS listIntent, NEVER newTasks
+- Only use newTasks when the user is creating actual tasks/to-dos, NOT lists
+
 Detect list-related intents and set listIntent when the user wants to interact with lists. listIntent works globally regardless of which tab is active.
 Actions:
-- CREATE: "create a [permanent/session] list called X" / "start a packing list for X" / "new grocery list"
+- CREATE: "create a [permanent/session] list called X" / "start a packing list for X" / "new grocery list" / "make a grocery list"
   → action: "create", listName: "X", createType: "permanent"|"session", context: "optional context"
-- ADD: "add [items] to my [list name] list" / "add [item] to [list name]"
+- ADD: "add [items] to my [list name] list" / "add [item] to [list name]" / "put [items] on the [list name] list"
   → action: "add", listName: "list name", items: ["item1", "item2"]
 - CHECK: "got the [items]" / "[items] done" / "check off [item] from [list name]"
   → action: "check", listName: "list name", markDone: ["item1", "item2"]
@@ -234,7 +244,8 @@ Actions:
   → action: "remove", listName: "list name", removeItems: ["item1"]
 - VIEW: "show me my [list name] list" / "pull up [list name]" / "what's on my [list name]"
   → action: "view", listName: "list name"
-- DONE: "[list name] done" / "mark [list name] complete" → action: "done", listName: "list name" (checks all items)
+- DONE: "[list name] done" / "done with [list name]" / "mark [list name] done" / "mark [list name] complete" / "finished the [list name]" / "finished [list name] list" / "[list name] list done"
+  → action: "done", listName: "list name" (checks all items)
 - ARCHIVE: "archive [list name]" / "I'm done with [list name]" → action: "archive", listName: "list name"
 - RECALL: "show me my last [list name]" / "what was on my last grocery list" → action: "recall", listName: "list name"
 

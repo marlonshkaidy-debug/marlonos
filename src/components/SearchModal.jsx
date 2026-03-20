@@ -105,14 +105,20 @@ export default function SearchModal({
   const isListView = modal.type === 'list'
   const items = modal.data || []
 
-  // For list view, split into core and regular, with checked at bottom
+  // For list view, split into core and regular, with unchecked at top (by item_order) and checked at bottom (by checked_at)
   let coreItems = []
   let regularItems = []
   if (isListView) {
-    const uncheckedCore = items.filter((i) => i.is_core && !i.is_checked)
-    const checkedCore = items.filter((i) => i.is_core && i.is_checked)
-    const uncheckedRegular = items.filter((i) => !i.is_core && !i.is_checked)
-    const checkedRegular = items.filter((i) => !i.is_core && i.is_checked)
+    const sortUnchecked = (a, b) => (a.item_order || 0) - (b.item_order || 0)
+    const sortChecked = (a, b) => {
+      const aTime = a.checked_at ? new Date(a.checked_at).getTime() : 0
+      const bTime = b.checked_at ? new Date(b.checked_at).getTime() : 0
+      return aTime - bTime
+    }
+    const uncheckedCore = items.filter((i) => i.is_core && !i.is_checked).sort(sortUnchecked)
+    const checkedCore = items.filter((i) => i.is_core && i.is_checked).sort(sortChecked)
+    const uncheckedRegular = items.filter((i) => !i.is_core && !i.is_checked).sort(sortUnchecked)
+    const checkedRegular = items.filter((i) => !i.is_core && i.is_checked).sort(sortChecked)
     coreItems = [...uncheckedCore, ...checkedCore]
     regularItems = [...uncheckedRegular, ...checkedRegular]
   }
@@ -130,14 +136,19 @@ export default function SearchModal({
 
         <div className="search-modal-header">
           <h2 className="search-modal-title">{modal.title}</h2>
-          {isListView && (
-            <button
-              className="search-modal-check-all"
-              onClick={() => onCheckAll && onCheckAll(modal.listId)}
-            >
-              Check All
+          <div className="search-modal-header-actions">
+            {isListView && (
+              <button
+                className="search-modal-check-all"
+                onClick={() => onCheckAll && onCheckAll(modal.listId)}
+              >
+                Check All
+              </button>
+            )}
+            <button className="search-modal-close-x" onClick={onClose} aria-label="Close">
+              &times;
             </button>
-          )}
+          </div>
         </div>
 
         <div className="search-modal-content">

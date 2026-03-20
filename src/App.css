@@ -992,6 +992,12 @@ button.section-header:hover {
   color: var(--text);
 }
 
+.search-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .search-modal-check-all {
   font-size: 13px;
   font-weight: 600;
@@ -999,6 +1005,26 @@ button.section-header:hover {
   padding: 6px 12px;
   border-radius: 8px;
   background: var(--accent-dim);
+}
+
+.search-modal-close-x {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.08));
+  color: var(--text-muted);
+  font-size: 20px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.search-modal-close-x:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .search-modal-content {
@@ -1073,7 +1099,7 @@ button.section-header:hover {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   position: relative;
   overflow: hidden;
-  transition: transform 0.15s ease;
+  transition: transform 0.3s ease, opacity 0.3s ease, background 0.15s ease;
 }
 
 .list-item-row.swiping {

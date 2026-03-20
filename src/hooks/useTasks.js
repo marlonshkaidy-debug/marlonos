@@ -54,6 +54,8 @@ export function useTasks() {
 
       // === DIAGNOSTIC LOGS (temporary) ===
       console.log('[DIAG] Full parsed Claude response:', JSON.stringify(result, null, 2))
+      console.log('[DIAG] listIntent:', JSON.stringify(result.listIntent))
+      console.log('[DIAG] newTasks count:', result.newTasks?.length ?? 0)
       console.log('[DIAG] subtaskGroups present?', Array.isArray(result.subtaskGroups), '| count:', result.subtaskGroups?.length ?? 0)
       console.log('[DIAG] newBuckets present?', Array.isArray(result.newBuckets), '| count:', result.newBuckets?.length ?? 0)
       console.log('[DIAG] memoryUpdates present?', Array.isArray(result.memoryUpdates), '| count:', result.memoryUpdates?.length ?? 0)
@@ -242,8 +244,145 @@ export function useTasks() {
         }
       }
 
-      // Add new tasks (regular, non-subtask)
-      if (result.newTasks?.length) {
+      // === LIST INTENT PROCESSING (before newTasks — listIntent takes priority) ===
+      let listIntentHandled = false
+      if (result.listIntent && result.listIntent.action && result.listIntent.listName) {
+        listIntentHandled = true
+        const li = result.listIntent
+        console.log('[ListIntent] action:', li.action, '| listName:', li.listName)
+
+        try {
+          if (li.action === 'create') {
+            const coreItems = await listService.getCoreItems(li.listName)
+            const newList = await listService.createList(
+              li.listName,
+              li.createType || 'permanent',
+              li.context || null
+            )
+            if (newList && coreItems.length > 0) {
+              for (let i = 0; i < coreItems.length; i++) {
+                await listService.addItem(newList.id, coreItems[i].text, true, i)
+              }
+            }
+            if (newList && li.items?.length) {
+              const offset = coreItems.length
+              for (let i = 0; i < li.items.length; i++) {
+                await listService.addItem(newList.id, li.items[i], false, offset + i)
+              }
+            }
+            if (listsRefreshRef.current) listsRefreshRef.current()
+            // Navigate to Lists tab so the user sees the new list
+            setNavigationTarget('lists')
+          }
+
+          if (li.action === 'add' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match && li.items?.length) {
+              const existingCount = (match.list_items || []).length
+              for (let i = 0; i < li.items.length; i++) {
+                await listService.addItem(match.id, li.items[i], false, existingCount + i)
+              }
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'check' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match && li.markDone?.length) {
+              for (const doneText of li.markDone) {
+                const item = (match.list_items || []).find(
+                  (i) => i.text.toLowerCase().includes(doneText.toLowerCase()) && !i.is_checked
+                )
+                if (item) await listService.checkItem(item.id)
+              }
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'remove' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match && li.removeItems?.length) {
+              for (const removeText of li.removeItems) {
+                const item = (match.list_items || []).find(
+                  (i) => i.text.toLowerCase().includes(removeText.toLowerCase())
+                )
+                if (item) await listService.deleteItem(item.id)
+              }
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'view' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              const fullList = await listService.getList(match.id)
+              setSearchModal({
+                isOpen: true,
+                title: fullList.name,
+                type: 'list',
+                data: fullList.list_items || [],
+                listId: fullList.id,
+              })
+            }
+          }
+
+          if (li.action === 'done' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              await listService.checkAllItems(match.id)
+              listService.promoteCoreItems(match.id).catch(() => {})
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'archive' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              await listService.archiveList(match.id)
+              if (listsRefreshRef.current) listsRefreshRef.current()
+            }
+          }
+
+          if (li.action === 'recall' && li.listName) {
+            const archived = await listService.getArchivedLists()
+            const match = archived.find(
+              (l) => l.name.toLowerCase().includes(li.listName.toLowerCase())
+            )
+            if (match) {
+              setSearchModal({
+                isOpen: true,
+                title: `${match.name} (archived)`,
+                type: 'list',
+                data: match.list_items || [],
+                listId: match.id,
+              })
+            }
+          }
+        } catch (err) {
+          console.error('[ListIntent] Failed to process list intent:', err)
+        }
+      }
+
+      // Add new tasks (regular, non-subtask) — SKIP if listIntent was handled
+      if (result.newTasks?.length && !listIntentHandled) {
         for (const task of result.newTasks) {
           const saved = await taskService.addTask({
             ...task,
@@ -329,142 +468,7 @@ export function useTasks() {
         setNavigationIntent(result.navigationIntent)
       }
 
-      // === LIST INTENT PROCESSING ===
-      if (result.listIntent) {
-        const li = result.listIntent
-        console.log('[ListIntent] action:', li.action, '| listName:', li.listName)
-
-        try {
-          if (li.action === 'create') {
-            // Check for existing list to pre-populate core items
-            const coreItems = await listService.getCoreItems(li.listName)
-            const newList = await listService.createList(
-              li.listName,
-              li.createType || 'permanent',
-              li.context || null
-            )
-            if (newList && coreItems.length > 0) {
-              for (let i = 0; i < coreItems.length; i++) {
-                await listService.addItem(newList.id, coreItems[i].text, true, i)
-              }
-            }
-            // Add any items specified in the create command
-            if (newList && li.items?.length) {
-              const offset = coreItems.length
-              for (let i = 0; i < li.items.length; i++) {
-                await listService.addItem(newList.id, li.items[i], false, offset + i)
-              }
-            }
-            if (listsRefreshRef.current) listsRefreshRef.current()
-          }
-
-          if (li.action === 'add' && li.listName) {
-            // Find matching list
-            const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
-            if (match && li.items?.length) {
-              const existingCount = (match.list_items || []).length
-              for (let i = 0; i < li.items.length; i++) {
-                await listService.addItem(match.id, li.items[i], false, existingCount + i)
-              }
-              if (listsRefreshRef.current) listsRefreshRef.current()
-            }
-          }
-
-          if (li.action === 'check' && li.listName) {
-            const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
-            if (match && li.markDone?.length) {
-              for (const doneText of li.markDone) {
-                const item = (match.list_items || []).find(
-                  (i) => i.text.toLowerCase().includes(doneText.toLowerCase()) && !i.is_checked
-                )
-                if (item) await listService.checkItem(item.id)
-              }
-              if (listsRefreshRef.current) listsRefreshRef.current()
-            }
-          }
-
-          if (li.action === 'remove' && li.listName) {
-            const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
-            if (match && li.removeItems?.length) {
-              for (const removeText of li.removeItems) {
-                const item = (match.list_items || []).find(
-                  (i) => i.text.toLowerCase().includes(removeText.toLowerCase())
-                )
-                if (item) await listService.deleteItem(item.id)
-              }
-              if (listsRefreshRef.current) listsRefreshRef.current()
-            }
-          }
-
-          if (li.action === 'view' && li.listName) {
-            const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
-            if (match) {
-              const fullList = await listService.getList(match.id)
-              setSearchModal({
-                isOpen: true,
-                title: fullList.name,
-                type: 'list',
-                data: fullList.list_items || [],
-                listId: fullList.id,
-              })
-            }
-          }
-
-          if (li.action === 'done' && li.listName) {
-            const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
-            if (match) {
-              await listService.checkAllItems(match.id)
-              // Auto-promote core items silently
-              listService.promoteCoreItems(match.id).catch(() => {})
-              if (listsRefreshRef.current) listsRefreshRef.current()
-            }
-          }
-
-          if (li.action === 'archive' && li.listName) {
-            const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
-            if (match) {
-              await listService.archiveList(match.id)
-              if (listsRefreshRef.current) listsRefreshRef.current()
-            }
-          }
-
-          if (li.action === 'recall' && li.listName) {
-            const archived = await listService.getArchivedLists()
-            const match = archived.find(
-              (l) => l.name.toLowerCase().includes(li.listName.toLowerCase())
-            )
-            if (match) {
-              setSearchModal({
-                isOpen: true,
-                title: `${match.name} (archived)`,
-                type: 'list',
-                data: match.list_items || [],
-                listId: match.id,
-              })
-            }
-          }
-        } catch (err) {
-          console.error('[ListIntent] Failed to process list intent:', err)
-        }
-      }
+      // (listIntent already processed above, before newTasks)
 
       // Track last added task IDs for voice correction
       if (createdTaskIds.length > 0) {
