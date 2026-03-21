@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTasks } from './hooks/useTasks'
 import { useLists } from './hooks/useLists'
+import { useMemory } from './hooks/useMemory'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
@@ -39,6 +40,7 @@ function App() {
     toggleItemCore,
     refreshLists,
   } = useLists()
+  const { memory } = useMemory()
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [activeBucket, setActiveBucket] = useState(ALL_FILTER)
@@ -551,7 +553,9 @@ function App() {
       {/* Search / List Modal */}
       <SearchModal
         modal={searchModal}
-        onClose={() => setSearchModal({ isOpen: false, title: '', type: 'tasks', data: [], listId: null })}
+        onClose={() => setSearchModal({ isOpen: false, title: '', type: 'tasks', data: [], listId: null, query: null })}
+        onVoiceCommand={addFromText}
+        memory={memory}
         onCheckItem={(itemId, listId) => {
           checkListItem(itemId, listId)
           setSearchModal((prev) => ({
@@ -597,8 +601,8 @@ function App() {
             ),
           }))
         }}
-        onAddItem={async (listId, text) => {
-          const newItem = await addItemToList(listId, text)
+        onAddItem={async (listId, text, isCore = false, order) => {
+          const newItem = await addItemToList(listId, text, isCore, order)
           if (newItem) {
             setSearchModal((prev) => ({
               ...prev,

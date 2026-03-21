@@ -16,7 +16,7 @@ export function useTasks() {
   const [navigationIntent, setNavigationIntent] = useState(null)
   const [searchTerm, setSearchTerm] = useState(null)
   const [reRecordRequested, setReRecordRequested] = useState(false)
-  const [searchModal, setSearchModal] = useState({ isOpen: false, title: '', type: 'tasks', data: [], listId: null })
+  const [searchModal, setSearchModal] = useState({ isOpen: false, title: '', type: 'tasks', data: [], listId: null, query: null })
   const lastAddedTaskIds = useRef([])
   // Ref to allow list refresh callback from outside
   const listsRefreshRef = useRef(null)
@@ -465,7 +465,100 @@ export function useTasks() {
 
       // Process extended navigationIntent
       if (result.navigationIntent) {
-        setNavigationIntent(result.navigationIntent)
+        const ni = result.navigationIntent
+        if (ni.action === 'modal') {
+          const filter = ni.filter || {}
+
+          if (ni.modalType === 'list' && filter.listName) {
+            // Find matching list and open in modal
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase().includes(filter.listName.toLowerCase())
+            )
+            if (match) {
+              const fullList = await listService.getList(match.id)
+              setSearchModal({
+                isOpen: true,
+                title: ni.title || fullList.name,
+                type: 'list',
+                data: fullList.list_items || [],
+                listId: fullList.id,
+                query: null,
+              })
+            } else {
+              // No matching list — open empty modal with no-results
+              setSearchModal({
+                isOpen: true,
+                title: ni.title || filter.listName,
+                type: 'list',
+                data: [],
+                listId: null,
+                query: filter.listName,
+              })
+            }
+          } else {
+            // Task modal — pure JS filtering, zero API calls
+            const now = new Date()
+            const todayStr = now.toLocaleDateString('en-CA', { timeZone: userConfig.timeZone })
+            const [cy, cm, cd] = todayStr.split('-').map(Number)
+            const pad = (n) => String(n).padStart(2, '0')
+            const fmtDate = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+            const tomorrowStr = fmtDate(new Date(cy, cm - 1, cd + 1))
+            const weekEndStr = fmtDate(new Date(cy, cm - 1, cd + 7))
+            const todayMidnight = new Date(cy, cm - 1, cd).getTime()
+
+            let filtered = [...tasks]
+
+            if (filter.timeRange === 'completed-today') {
+              filtered = filtered.filter(t => {
+                if (t.status !== 'completed' || !t.completedAt) return false
+                return new Date(t.completedAt).getTime() >= todayMidnight
+              })
+            } else {
+              // Active/rolled tasks only
+              filtered = filtered.filter(t => t.status === 'active' || t.status === 'rolled')
+
+              if (filter.timeRange === 'today') {
+                filtered = filtered.filter(t => t.dueDate === todayStr)
+              } else if (filter.timeRange === 'tomorrow') {
+                filtered = filtered.filter(t => t.dueDate === tomorrowStr)
+              } else if (filter.timeRange === 'this-week') {
+                filtered = filtered.filter(t => t.dueDate >= todayStr && t.dueDate <= weekEndStr)
+              } else if (filter.timeRange === 'overdue') {
+                filtered = filtered.filter(t => t.dueDate && t.dueDate < todayStr)
+              }
+            }
+
+            if (filter.bucket) {
+              filtered = filtered.filter(t =>
+                t.bucket.toLowerCase() === filter.bucket.toLowerCase()
+              )
+            }
+
+            if (filter.priority) {
+              filtered = filtered.filter(t => t.priority === filter.priority)
+            }
+
+            if (filter.searchTerm) {
+              const term = filter.searchTerm.toLowerCase()
+              filtered = filtered.filter(t => t.text.toLowerCase().includes(term))
+            }
+
+            // Exclude subtasks from results
+            filtered = filtered.filter(t => !t.parent_task_id)
+
+            setSearchModal({
+              isOpen: true,
+              title: ni.title || 'Results',
+              type: 'tasks',
+              data: filtered,
+              listId: null,
+              query: filter.searchTerm || null,
+            })
+          }
+        } else {
+          setNavigationIntent(ni)
+        }
       }
 
       // (listIntent already processed above, before newTasks)

@@ -108,3 +108,26 @@ Full lists system with permanent/session types. List service with complete CRUD,
 Added VISION.md, ARCHITECTURE.md, and CHANGELOG.md as living project documents.
 
 **Files created:** `docs/VISION.md`, `docs/ARCHITECTURE.md`, `docs/CHANGELOG.md`
+
+---
+
+## 2026-03-21
+
+### Batch 4 — Modal Mic, Empty Search Results, List Templates, Universal Modal Queries
+
+Four interconnected features that upgrade the SearchModal from a passive display to an active voice-first interface:
+
+**1. Mic Button Inside Search Modal**
+Added voice recording capability directly inside the SearchModal. Mic button appears in the list-add-form (alongside text input and + button) for list views, and in the footer for task views. Same tap-to-start/tap-to-stop behavior as the main app. Voice status ("Recording... tap to send" / "Transcribing...") displays above the modal content. Voice commands processed through the global `addFromText` pipeline. Close commands ("done", "never mind", "close", "go back") dismiss the modal.
+
+**2. Empty & Partial Search Results**
+When a voice query returns zero results, the SearchModal opens with an intelligent no-results screen instead of showing blank. Shows the search query in the header ("No results for: [term]"), a helpful message, "Did you mean:" suggestions from the memory spine (partial match on entity_name), and a voice prompt to create a task or dismiss. Applies to both task and list searches.
+
+**3. Smart List Seeding — Static Templates**
+Created `listTemplates.js` with four template categories (packing, sports, camping, cleaning). When a new empty list opens in the modal and its name matches a template trigger word, a seeding banner appears with pre-checked suggested items. Users can remove items via X buttons, then tap "Confirm Items" or say "looks good" to save them as `is_core = true` items. After confirmation, shows "What else do you want to add?" prompt. Grocery lists intentionally have no template. First-time seeding only — never re-seeds lists that already have items.
+
+**4. Universal Modal Query Rule**
+Updated Claude system prompt with an absolute MODAL RULE: all queries (show me, find, search for, pull up, what do I have, what's left, etc.) now return `navigationIntent` with `action: "modal"` instead of `action: "filter"`. Modal intents carry structured filters: `bucket`, `timeRange`, `priority`, `searchTerm`, `listName`. All filtering is pure JavaScript — zero additional API calls. Supported time ranges: today, tomorrow, this-week, overdue, completed-today. Filters combine (e.g., bucket + timeRange). Subtasks excluded from results. The main task list never changes in-place from a voice query — the modal is always the answer.
+
+**Files created:** `src/config/listTemplates.js`
+**Files modified:** `src/services/claudeService.js`, `src/hooks/useTasks.js`, `src/components/SearchModal.jsx`, `src/App.jsx`, `src/App.css`, `docs/CHANGELOG.md`

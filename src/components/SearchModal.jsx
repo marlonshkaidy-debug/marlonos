@@ -1,6 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import userConfig from '../config/userConfig'
 import { getDueDateLabel } from '../utils/time'
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
+import { transcribeAudio } from '../services/whisperService'
+import { findTemplate } from '../config/listTemplates'
 
 export default function SearchModal({
   modal,
@@ -11,6 +14,8 @@ export default function SearchModal({
   onDeleteItem,
   onToggleCore,
   onAddItem,
+  onVoiceCommand,
+  memory,
 }) {
   const [addText, setAddText] = useState('')
   const [swipingId, setSwipingId] = useState(null)
@@ -21,6 +26,122 @@ export default function SearchModal({
   const overlayRef = useRef(null)
   const sheetRef = useRef(null)
   const dragStartY = useRef(null)
+
+  // Voice recording
+  const { isRecording, audioBlob, startRecording, stopRecording } = useVoiceRecorder()
+  const [voiceStatus, setVoiceStatus] = useState(null)
+  const pendingTranscription = useRef(false)
+
+  // Template seeding
+  const [seedItems, setSeedItems] = useState(null)
+  const [seedingDone, setSeedingDone] = useState(false)
+  const seedItemsRef = useRef(null)
+  useEffect(() => { seedItemsRef.current = seedItems }, [seedItems])
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (!modal.isOpen) return
+    setVoiceStatus(null)
+    setSeedingDone(false)
+    setAddText('')
+    pendingTranscription.current = false
+
+    // Template seeding for empty list modals
+    if (modal.type === 'list' && modal.listId && (!modal.data || modal.data.length === 0)) {
+      const template = findTemplate(modal.title)
+      if (template) {
+        setSeedItems({
+          label: template.label,
+          items: template.items.map((text, i) => ({ text, id: `seed-${i}`, included: true })),
+        })
+      } else {
+        setSeedItems(null)
+      }
+    } else {
+      setSeedItems(null)
+    }
+  }, [modal.isOpen, modal.type, modal.listId, modal.title]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mic toggle
+  const handleMicToggle = useCallback(() => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      setVoiceStatus('recording')
+      startRecording()
+    }
+  }, [isRecording, startRecording, stopRecording])
+
+  // Process audio when recording stops
+  useEffect(() => {
+    if (!audioBlob || pendingTranscription.current || !modal.isOpen) return
+    pendingTranscription.current = true
+
+    const run = async () => {
+      setVoiceStatus('transcribing')
+      try {
+        const transcript = await transcribeAudio(audioBlob)
+        if (!transcript) return
+
+        const lower = transcript.toLowerCase().trim()
+
+        // Close commands
+        if (['done', 'never mind', 'nevermind', 'close', 'go back'].includes(lower)) {
+          onClose()
+          return
+        }
+
+        // "Looks good" during template seeding → confirm seed items
+        if (seedItemsRef.current && !seedingDone) {
+          if (['looks good', 'that looks good', 'yes', 'confirm', 'perfect'].includes(lower)) {
+            const items = seedItemsRef.current.items
+            if (items && modal.listId && onAddItem) {
+              const included = items.filter(item => item.included)
+              for (let i = 0; i < included.length; i++) {
+                await onAddItem(modal.listId, included[i].text, true, i)
+              }
+              setSeedingDone(true)
+              setSeedItems(null)
+            }
+            return
+          }
+        }
+
+        // Process through global pipeline
+        if (onVoiceCommand) {
+          await onVoiceCommand(transcript)
+        }
+      } finally {
+        setVoiceStatus(null)
+        pendingTranscription.current = false
+      }
+    }
+    run()
+  }, [audioBlob]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Seed item removal
+  const handleSeedRemove = (seedId) => {
+    setSeedItems(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        items: prev.items.map(item =>
+          item.id === seedId ? { ...item, included: false } : item
+        ),
+      }
+    })
+  }
+
+  // Seed confirmation via button
+  const handleSeedConfirm = async () => {
+    if (!seedItems || !modal.listId || !onAddItem) return
+    const included = seedItems.items.filter(item => item.included)
+    for (let i = 0; i < included.length; i++) {
+      await onAddItem(modal.listId, included[i].text, true, i)
+    }
+    setSeedingDone(true)
+    setSeedItems(null)
+  }
 
   // Close on overlay click
   const handleOverlayClick = (e) => {
@@ -54,7 +175,6 @@ export default function SearchModal({
   const handleItemTouchStart = (e, itemId) => {
     touchStartX.current = e.touches[0].clientX
     touchCurrentX.current = e.touches[0].clientX
-    // Long press detection
     longPressTimer.current = setTimeout(() => {
       setLongPressId(itemId)
     }, 600)
@@ -100,15 +220,26 @@ export default function SearchModal({
     setAddText('')
   }
 
+  // "Did you mean" suggestions from memory for no-results
+  const didYouMean = useMemo(() => {
+    if (!modal.query || (modal.data && modal.data.length > 0)) return []
+    if (!memory || memory.length === 0) return []
+    const queryWords = modal.query.toLowerCase().split(/\s+/)
+    return memory
+      .filter(m => queryWords.some(w => m.entity_name.toLowerCase().includes(w)))
+      .slice(0, 3)
+  }, [modal.query, modal.data, memory])
+
   if (!modal.isOpen) return null
 
   const isListView = modal.type === 'list'
   const items = modal.data || []
+  const hasNoResults = items.length === 0
 
-  // For list view, split into core and regular, with unchecked at top (by item_order) and checked at bottom (by checked_at)
+  // For list view, split into core and regular
   let coreItems = []
   let regularItems = []
-  if (isListView) {
+  if (isListView && !seedItems) {
     const sortUnchecked = (a, b) => (a.item_order || 0) - (b.item_order || 0)
     const sortChecked = (a, b) => {
       const aTime = a.checked_at ? new Date(a.checked_at).getTime() : 0
@@ -123,6 +254,15 @@ export default function SearchModal({
     regularItems = [...uncheckedRegular, ...checkedRegular]
   }
 
+  const micIcon = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="1" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+    </svg>
+  )
+
   return (
     <div className="search-modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
       <div
@@ -135,9 +275,11 @@ export default function SearchModal({
         <div className="search-modal-handle" />
 
         <div className="search-modal-header">
-          <h2 className="search-modal-title">{modal.title}</h2>
+          <h2 className="search-modal-title">
+            {hasNoResults && modal.query ? `No results for: ${modal.query}` : modal.title}
+          </h2>
           <div className="search-modal-header-actions">
-            {isListView && (
+            {isListView && !seedItems && (
               <button
                 className="search-modal-check-all"
                 onClick={() => onCheckAll && onCheckAll(modal.listId)}
@@ -151,11 +293,53 @@ export default function SearchModal({
           </div>
         </div>
 
+        {/* Voice Status */}
+        {voiceStatus && (
+          <div className="modal-voice-status">
+            {voiceStatus === 'recording' ? 'Recording... tap to send' : 'Transcribing...'}
+          </div>
+        )}
+
         <div className="search-modal-content">
           {isListView ? (
             <>
+              {/* Template Seeding Banner */}
+              {seedItems && !seedingDone && (
+                <div className="seed-banner">
+                  <div className="seed-banner-title">
+                    Suggested {seedItems.label} items — tap to remove any that don't apply, then add your own
+                  </div>
+                  <div className="seed-items-list">
+                    {seedItems.items.map((item) => (
+                      item.included && (
+                        <div key={item.id} className="seed-item-row">
+                          <span className="seed-item-check">&#10003;</span>
+                          <span className="seed-item-text">{item.text}</span>
+                          <button
+                            className="seed-item-remove"
+                            onClick={() => handleSeedRemove(item.id)}
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                  <button className="seed-confirm-btn" onClick={handleSeedConfirm}>
+                    Confirm Items
+                  </button>
+                </div>
+              )}
+
+              {/* "What else?" prompt after seeding */}
+              {seedingDone && (
+                <div className="seed-done-prompt">
+                  What else do you want to add?
+                </div>
+              )}
+
               {/* Core Items Section */}
-              {coreItems.length > 0 && (
+              {!seedItems && coreItems.length > 0 && (
                 <div className="list-section-core">
                   <div className="list-section-label">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="#c9a84c" stroke="none">
@@ -193,7 +377,7 @@ export default function SearchModal({
               )}
 
               {/* Regular Items Section */}
-              {regularItems.length > 0 && (
+              {!seedItems && regularItems.length > 0 && (
                 <div className="list-section-regular">
                   {coreItems.length > 0 && (
                     <div className="list-section-label">Items</div>
@@ -227,28 +411,63 @@ export default function SearchModal({
                 </div>
               )}
 
-              {coreItems.length === 0 && regularItems.length === 0 && (
+              {!seedItems && coreItems.length === 0 && regularItems.length === 0 && !seedingDone && (
                 <div className="search-modal-empty">No items yet. Add some below or say "add milk to {modal.title}"</div>
               )}
 
-              {/* Add Item Form */}
-              <form className="list-add-form" onSubmit={handleAddItem}>
-                <input
-                  type="text"
-                  placeholder="Add an item..."
-                  value={addText}
-                  onChange={(e) => setAddText(e.target.value)}
-                />
-                <button type="submit" disabled={!addText.trim()}>
-                  +
-                </button>
-              </form>
+              {/* Add Item Form with Mic */}
+              {!seedItems && (
+                <form className="list-add-form" onSubmit={handleAddItem}>
+                  <input
+                    type="text"
+                    placeholder="Add an item..."
+                    value={addText}
+                    onChange={(e) => setAddText(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={`mic-btn modal-mic-btn ${isRecording ? 'recording' : ''}`}
+                    onClick={handleMicToggle}
+                    disabled={voiceStatus === 'transcribing'}
+                    aria-label={isRecording ? 'Tap to send recording' : 'Tap to record'}
+                  >
+                    {micIcon}
+                  </button>
+                  <button type="submit" disabled={!addText.trim()}>
+                    +
+                  </button>
+                </form>
+              )}
             </>
           ) : (
             /* Task search results */
             <>
-              {items.length === 0 ? (
-                <div className="search-modal-empty">No matching tasks found</div>
+              {hasNoResults ? (
+                <div className="search-no-results">
+                  {modal.query ? (
+                    <>
+                      <div className="no-results-message">
+                        No tasks found for "{modal.query}".
+                      </div>
+                      {didYouMean.length > 0 && (
+                        <div className="no-results-suggestions">
+                          <div className="no-results-label">Did you mean:</div>
+                          {didYouMean.map((entity) => (
+                            <div key={entity.id || entity.entity_name} className="no-results-suggestion">
+                              {entity.entity_name}
+                              <span className="no-results-suggestion-bucket">{entity.default_bucket}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="no-results-prompt">
+                        Say "add a task for {modal.query}" to create one, or "never mind" to close
+                      </div>
+                    </>
+                  ) : (
+                    <div className="no-results-message">No matching tasks found</div>
+                  )}
+                </div>
               ) : (
                 items.map((task) => {
                   const bucketColor = userConfig.getBucketColor(task.bucket)
@@ -283,8 +502,19 @@ export default function SearchModal({
         </div>
 
         <div className="search-modal-footer">
+          {!isListView && (
+            <button
+              type="button"
+              className={`mic-btn modal-mic-btn ${isRecording ? 'recording' : ''}`}
+              onClick={handleMicToggle}
+              disabled={voiceStatus === 'transcribing'}
+              aria-label={isRecording ? 'Tap to send recording' : 'Tap to record'}
+            >
+              {micIcon}
+            </button>
+          )}
           <button className="search-modal-done" onClick={onClose}>
-            Done
+            {hasNoResults ? 'Close' : 'Done'}
           </button>
         </div>
       </div>

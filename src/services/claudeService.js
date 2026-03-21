@@ -211,14 +211,38 @@ If the user says "delete the [bucket name] bucket", "remove the [bucket name] bu
 - Default buckets (Work / Advisory, Coaching, Home / Personal, Ventures) CANNOT be deleted. If the user tries, set response to "That's a default bucket and cannot be deleted" and leave deleteBucket as null.
 
 NAVIGATION & SEARCH:
-Detect navigation, filtering, and search intents. Set navigationIntent when the user wants to navigate, filter, or search.
-- "go to lists" / "show me my lists" / "open lists" → action: "navigate", target: "lists"
-- "go to tasks" / "show me my tasks" / "back to tasks" → action: "navigate", target: "tasks"
-- "show me my [bucket] list" / "show me [bucket] tasks" → action: "filter", target: "tasks", filter: "[bucket name]"
-- "show me everything" / "show all" → action: "filter", target: "tasks", filter: "all"
-- "show me overdue" → action: "filter", target: "tasks", filter: "overdue"
-- "show me upcoming" → action: "filter", target: "tasks", filter: "upcoming"
-- "find [term]" / "search for [term]" / "show me [person] tasks" → action: "search", filter: "[term]"
+Detect navigation and query intents. Set navigationIntent when the user wants to navigate or query.
+- "go to lists" / "open lists" → action: "navigate", target: "lists"
+- "go to tasks" / "back to tasks" → action: "navigate", target: "tasks"
+
+MODAL RULE (ABSOLUTE — NEVER OVERRIDE): Any input containing show me, find, search for, pull up, what do I have, what's left, what's due, look up, display, or any interrogative asking about tasks or lists MUST return navigationIntent with action: "modal" and the appropriate filter. NEVER return navigationIntent with action: "filter" for these queries. The modal is always the answer to any query.
+
+Modal query format — navigationIntent with action "modal":
+{
+  "action": "modal",
+  "modalType": "tasks" or "list",
+  "filter": {
+    "bucket": "bucket name or null",
+    "timeRange": "today|tomorrow|this-week|overdue|completed-today or null",
+    "priority": "critical|high|normal|low or null",
+    "searchTerm": "search text or null",
+    "listName": "list name or null"
+  },
+  "title": "human-readable title for modal header"
+}
+
+Examples:
+- "show me my coaching tasks" → action: "modal", modalType: "tasks", filter: { "bucket": "Coaching" }, title: "Coaching Tasks"
+- "what do I have tomorrow" → action: "modal", modalType: "tasks", filter: { "timeRange": "tomorrow" }, title: "Due Tomorrow"
+- "show me today's tasks" → action: "modal", modalType: "tasks", filter: { "timeRange": "today" }, title: "Today's Tasks"
+- "what's overdue" → action: "modal", modalType: "tasks", filter: { "timeRange": "overdue" }, title: "Overdue Tasks"
+- "show me this week" → action: "modal", modalType: "tasks", filter: { "timeRange": "this-week" }, title: "This Week"
+- "find Jason Armstrong" → action: "modal", modalType: "tasks", filter: { "searchTerm": "Jason Armstrong" }, title: "Jason Armstrong"
+- "show me critical tasks" → action: "modal", modalType: "tasks", filter: { "priority": "critical" }, title: "Critical Tasks"
+- "what did I complete today" → action: "modal", modalType: "tasks", filter: { "timeRange": "completed-today" }, title: "Completed Today"
+- "show me my grocery list" → action: "modal", modalType: "list", filter: { "listName": "grocery" }, title: "Grocery List"
+- "what's left for work" → action: "modal", modalType: "tasks", filter: { "bucket": "Work / Advisory", "timeRange": "today" }, title: "Work Tasks Today"
+- "show me everything" / "show all" → action: "modal", modalType: "tasks", filter: {}, title: "All Tasks"
 Also still set the legacy "navigation" field for basic "tasks"/"lists" navigation for backward compatibility.
 
 LIST MANAGEMENT — HIGHEST PRIORITY INTENT:
@@ -308,7 +332,7 @@ Always respond with valid JSON in this exact structure:
 deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed": true/false }
 appendToParent, when present, should be: { "parentIdentifier": "partial match of existing parent task text", "newSubtasks": [{ "text": "subtask description", "priority": "normal" }] }
 navigation, when present, should be: "tasks" or "lists"
-navigationIntent, when present, should be: { "action": "navigate|filter|search", "target": "tasks|lists", "filter": "bucket name or search term or null" }
+navigationIntent, when present, should be: { "action": "navigate|modal", "target": "tasks|lists" (for navigate), "modalType": "tasks|list" (for modal), "filter": { "bucket": "string|null", "timeRange": "string|null", "priority": "string|null", "searchTerm": "string|null", "listName": "string|null" } (for modal), "title": "string" (for modal) }
 listIntent, when present, should be: { "action": "create|add|check|remove|view|done|archive|recall", "listName": "name of the list", "items": ["items to add"], "markDone": ["items to check"], "removeItems": ["items to remove"], "createType": "permanent|session", "context": "optional context for session lists" }
 voiceCorrection, when present, should be: { "type": "redo|cancel|amend|priority|bucket|reschedule", "targetDescription": "description of what is being corrected", "action": "what to do", "value": "the new value if applicable" }
 vocabularyUpdate, when present, should be: { "term": "the term", "definition": "the definition" }

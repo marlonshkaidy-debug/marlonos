@@ -1210,3 +1210,191 @@ button.section-header:hover {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ══════════════════════════════════════════
+   BATCH 4 — Modal Mic, No-Results, Templates
+   ══════════════════════════════════════════ */
+
+/* ── Modal Mic Button ── */
+.modal-mic-btn {
+  width: 36px;
+  height: 36px;
+}
+
+.modal-mic-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Modal Voice Status ── */
+.modal-voice-status {
+  text-align: center;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--red);
+  background: rgba(229, 69, 69, 0.08);
+  border-bottom: 1px solid var(--border);
+  animation: pulse 1.2s infinite;
+}
+
+/* ── Footer with mic button ── */
+.search-modal-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.search-modal-footer .search-modal-done {
+  flex: 1;
+}
+
+/* ── No Results Display ── */
+.search-no-results {
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.no-results-message {
+  font-size: 15px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.no-results-suggestions {
+  margin-bottom: 20px;
+  text-align: left;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.no-results-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.no-results-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--text);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.no-results-suggestion:last-child {
+  border-bottom: none;
+}
+
+.no-results-suggestion-bucket {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.no-results-prompt {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* ── Template Seeding ── */
+.seed-banner {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.seed-banner-title {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.seed-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.seed-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.seed-item-row:last-child {
+  border-bottom: none;
+}
+
+.seed-item-check {
+  color: var(--green);
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--green);
+  background: var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bg);
+  font-size: 12px;
+}
+
+.seed-item-text {
+  flex: 1;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.seed-item-remove {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(220, 38, 38, 0.1);
+  color: #DC2626;
+  font-size: 16px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.seed-confirm-btn {
+  margin-top: 14px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.seed-done-prompt {
+  text-align: center;
+  padding: 20px;
+  font-size: 15px;
+  color: var(--accent);
+  font-weight: 500;
+}
