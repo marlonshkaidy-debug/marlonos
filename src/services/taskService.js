@@ -129,6 +129,10 @@ export async function deleteTask(id) {
   if (error) throw error
 }
 
+export async function convertToParent(id) {
+  return updateTask(id, { is_parent: true })
+}
+
 export async function rolloverTasks() {
   const today = new Date().toISOString().split('T')[0]
   const { data, error } = await supabase

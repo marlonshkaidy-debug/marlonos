@@ -117,11 +117,11 @@ const userConfig = {
 
   priorityRules: {
     critical:
-      'ONLY when user explicitly says "high priority", "critical", "must do today", "urgent", or "ASAP"',
-    high: 'when user says "important" or "need to do today"',
+      'ONLY when user explicitly says "must do today", "critical", "urgent", "drop everything", "before I leave today", or "cannot wait"',
+    high: '"important", "high priority", "need to get this done today", "ASAP"',
     normal:
-      'default for everything else, including personal/family tasks like pickups, appointments, and errands',
-    low: '"whenever", "eventually", "at some point"',
+      'DEFAULT for everything else including "follow up", "enroll", "complete", "call", "email", "send", "process", "evaluate", "review" — any action word without explicit urgency. When in doubt always use NORMAL.',
+    low: '"whenever", "eventually", "at some point", "no rush"',
   },
 
   timeZone: 'America/Chicago',

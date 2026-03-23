@@ -185,6 +185,7 @@ ${bucketLines}
 Priority inference rules (be conservative — do not over-escalate):
 ${priorityLines}
 Personal family tasks (e.g. picking up kids, dance, school drop-offs, errands) should default to normal priority unless the user explicitly flags them otherwise.
+CRITICAL PRIORITY RULE: NEVER infer urgency from the type of task, the importance of the client, or the subject matter. ONLY explicit user language ("must do today", "critical", "urgent", "drop everything", "before I leave today", "cannot wait") elevates a task above NORMAL. A task about a major client is still NORMAL unless the user says otherwise.
 
 mustDoToday: Only set to true if user explicitly says "must do today", "has to happen today", or "before I leave today". Do not infer mustDoToday from context alone.
 
@@ -237,7 +238,8 @@ RULE: If tasks share a common subject/person/project/context, they MUST go into 
 
 APPEND TO EXISTING PARENT TASK:
 If the user says "add to [name]'s tasks", "add another task for [name]", "add to the [task name]", "also for [name]...", or similar phrases indicating they want to add subtasks to an EXISTING parent task (one already in their current task list), use appendToParent instead of subtaskGroups.
-- Set parentIdentifier to a string that partially matches the existing parent task's text (case-insensitive).
+- Set parentIdentifier to a string that partially matches the existing parent task's text (case-insensitive). For subject-first tasks like "Carrie & Teresa Kalhoff: complete right bridge", use the subject portion "Carrie & Teresa Kalhoff" as parentIdentifier.
+- Set bucket to the most appropriate bucket for this entity based on memory context and task nature. If the entity is in memory, use their known bucket. If uncertain, use Work / Advisory for professional tasks and Home / Personal for family/personal tasks.
 - Set newSubtasks to the array of new subtasks to add under that parent.
 - Do NOT create a new parent via subtaskGroups when the user clearly wants to add to an existing one.
 
@@ -327,7 +329,8 @@ Actions:
 - DONE: "[list name] done" / "done with [list name]" / "mark [list name] done" / "mark [list name] complete" / "finished the [list name]" / "finished [list name] list" / "[list name] list done"
   → action: "done", listName: "list name" (checks all items)
 - ARCHIVE: "archive [list name]" / "I'm done with [list name]" → action: "archive", listName: "list name"
-- DELETE: "delete [list name]" / "remove [list name] list" / "get rid of [list name]" → action: "delete", listName: "list name"
+- DELETE: "delete [list name]" / "remove [list name] list" / "get rid of [list name]" / "delete my [list name] list" / "delete the [list name]" → action: "delete", listName: "list name"
+  EXAMPLES: "delete the grocery list" → action: "delete", listName: "grocery" | "get rid of my packing list" → action: "delete", listName: "packing"
 - RECALL: "show me my last [list name]" / "what was on my last grocery list" → action: "recall", listName: "list name"
 
 Permanent vs Session detection:
@@ -398,7 +401,7 @@ Always respond with valid JSON in this exact structure:
 }
 
 deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed": true/false }
-appendToParent, when present, should be: { "parentIdentifier": "partial match of existing parent task text", "newSubtasks": [{ "text": "subtask description", "priority": "normal" }] }
+appendToParent, when present, should be: { "parentIdentifier": "partial match of existing parent task text", "bucket": "suggested bucket based on context and memory", "newSubtasks": [{ "text": "subtask description", "priority": "normal" }] }
 navigation, when present, should be: "tasks" or "lists"
 navigationIntent, when present, should be: { "action": "navigate|modal", "target": "tasks|lists" (for navigate), "modalType": "tasks|list" (for modal), "filter": { "bucket": "string|null", "timeRange": "string|null", "timeOfDay": { "start": "HH:MM", "end": "HH:MM" } or null, "priority": "string|null", "searchTerm": "string|null", "listName": "string|null" } (for modal), "title": "string" (for modal) }
 listIntent, when present, should be: { "action": "create|add|check|remove|view|done|archive|delete|recall", "listName": "name of the list", "items": ["items to add"], "markDone": ["items to check"], "removeItems": ["items to remove"], "createType": "permanent|session", "context": "optional context for session lists" }

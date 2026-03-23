@@ -197,15 +197,25 @@ export function useTasks(showToast) {
 
       // Process appendToParent: add subtasks to existing parent
       if (result.appendToParent) {
-        const { parentIdentifier, newSubtasks } = result.appendToParent
+        const { parentIdentifier, newSubtasks, bucket: appendBucket } = result.appendToParent
         if (parentIdentifier && newSubtasks?.length) {
+          const identLower = parentIdentifier.toLowerCase()
+          // Match ALL active tasks — no is_parent gate
+          // Second condition handles subject-first format: parentIdentifier may match
+          // the subject portion (before ':') of an existing task
           const parentMatch = tasks.find(
             (t) =>
-              t.is_parent &&
               t.status === 'active' &&
-              t.text.toLowerCase().includes(parentIdentifier.toLowerCase())
+              (
+                t.text.toLowerCase().includes(identLower) ||
+                identLower.includes(t.text.toLowerCase().split(':')[0].toLowerCase().trim())
+              )
           )
           if (parentMatch) {
+            // Convert flat task to parent if not already one
+            if (!parentMatch.is_parent) {
+              await taskService.convertToParent(parentMatch.id)
+            }
             const existingSubs = tasks.filter(
               (t) => t.parent_task_id === parentMatch.id
             )
@@ -223,13 +233,37 @@ export function useTasks(showToast) {
               createdTaskIds.push(saved.id)
             }
           } else {
-            // No matching parent found — create new parent with subtasks
+            // No matching parent found — resolve bucket: Claude suggestion → memory → Work/Advisory
+            let resolvedBucket = 'Work / Advisory'
+            try {
+              // Exact entity lookup
+              const memoryMatch = await memoryService.lookupEntity(parentIdentifier)
+              if (memoryMatch?.default_bucket) {
+                resolvedBucket = memoryMatch.default_bucket
+              } else {
+                // Word-by-word match against full memory
+                const memCtx = await memoryService.getMemory()
+                const identWords = parentIdentifier.toLowerCase().split(/\s+/)
+                const wordMatch = memCtx.find((m) =>
+                  identWords.some(
+                    (w) => w.length > 2 && m.entity_name.toLowerCase().includes(w)
+                  )
+                )
+                if (wordMatch?.default_bucket) {
+                  resolvedBucket = wordMatch.default_bucket
+                }
+              }
+            } catch (_) { /* memory fails silently */ }
+            // Claude's bucket suggestion takes priority over memory lookup
+            if (appendBucket) resolvedBucket = appendBucket
+
             const newParent = await taskService.addParentTask({
               text: parentIdentifier,
-              bucket: 'Home / Personal',
+              bucket: resolvedBucket,
               priority: 'normal',
             })
             createdTaskIds.push(newParent.id)
+            if (showToast) showToast(`Created new task group for ${parentIdentifier}`, 'info')
             let order = 0
             for (const sub of newSubtasks) {
               const saved = await taskService.addSubtask(
@@ -370,13 +404,18 @@ export function useTasks(showToast) {
 
           if (li.action === 'delete' && li.listName) {
             const allLists = await listService.getLists()
-            const match = allLists.find(
-              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
-            )
+            const nameLower = li.listName.toLowerCase()
+            // Fuzzy match: exact → includes → reverse includes
+            const match =
+              allLists.find((l) => l.name.toLowerCase() === nameLower) ||
+              allLists.find((l) => l.name.toLowerCase().includes(nameLower)) ||
+              allLists.find((l) => nameLower.includes(l.name.toLowerCase()))
             if (match) {
               await listService.deleteList(match.id)
               if (listsRefreshRef.current) listsRefreshRef.current()
               if (showToast) showToast(`${match.name} deleted`, 'success')
+            } else {
+              if (showToast) showToast(`List "${li.listName}" not found`, 'error')
             }
           }
 

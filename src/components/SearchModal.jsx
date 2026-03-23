@@ -64,11 +64,14 @@ export default function SearchModal({
     }
   }, [modal.isOpen, modal.type, modal.listId, modal.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mic toggle
+  // Mic toggle — tap once to start (pulse red), tap again to stop immediately
+  // Setting 'transcribing' on stop prevents double-tap and shows correct status
   const handleMicToggle = useCallback(() => {
     if (isRecording) {
+      setVoiceStatus('transcribing')
       stopRecording()
     } else {
+      pendingTranscription.current = false
       setVoiceStatus('recording')
       startRecording()
     }

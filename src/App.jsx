@@ -573,6 +573,10 @@ function App() {
                 listId: list.id,
               })
             }}
+            onDeleteList={async (listId, listName) => {
+              await deleteList(listId)
+              showToast(`${listName} deleted`, 'success')
+            }}
           />
         )}
       </div>

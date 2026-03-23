@@ -865,6 +865,7 @@ button.section-header:hover {
   text-align: left;
   transition: background 0.15s ease;
   width: 100%;
+  cursor: pointer;
 }
 
 .list-card:active {
@@ -939,6 +940,62 @@ button.section-header:hover {
   color: var(--text-muted);
   font-weight: 500;
   flex-shrink: 0;
+}
+
+.list-card-trash-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+  margin-left: auto;
+}
+
+.list-card-trash-btn:hover {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.list-card-delete-confirm {
+  padding: 4px 0;
+}
+
+.list-card-delete-prompt {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.list-card-delete-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.list-card-delete-confirm-btn {
+  background: #EF4444;
+  color: #fff;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.list-card-delete-cancel-btn {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border: none;
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 /* ── Search / List Modal ── */

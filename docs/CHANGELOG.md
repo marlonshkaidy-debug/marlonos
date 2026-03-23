@@ -159,3 +159,36 @@ Added `toast` state and `showToast(message, type)` to `App.jsx`. Toast renders a
 Added TASK FORMAT RULE to Claude's system prompt: every task must be formatted as [Subject]: [concise action]. Subject = primary person/entity/thing. Action = 3-6 words, no filler. Examples provided for common input patterns. Applied to all tasks in newTasks and subtaskGroups.
 
 **Files modified:** `src/services/claudeService.js`, `src/hooks/useTasks.js`, `src/components/SearchModal.jsx`, `src/App.jsx`, `src/App.css`, `docs/CHANGELOG.md`
+
+---
+
+## 2026-03-23
+
+### Fix Batch — Append-to-Task Gate, Memory Fallback, Modal Mic, Delete List, Reformat Tasks, Priority Calibration
+
+Seven targeted fixes across the task append pipeline, NLP layer, voice pipeline, list UI, and migration tooling:
+
+**1. Remove is_parent Gate from appendToParent (Fix 1)**
+The `appendToParent` matching in `useTasks.js` gated on `t.is_parent === true`, silently rejecting flat tasks that the user intended to extend. Removed the gate entirely. Now matches ALL active tasks. Added second match condition for subject-first format: if `parentIdentifier` is "Carrie & Teresa Kalhoff" and the task is "Carrie & Teresa Kalhoff: complete right bridge", the subject extracted before the colon matches. If matched task is not yet a parent, calls new `taskService.convertToParent(id)` to promote it before adding subtasks.
+
+**2. Add Bucket to appendToParent Schema (Fix 2)**
+Updated `appendToParent` schema in Claude prompt and JSON spec to include `bucket`. Claude now always suggests a bucket based on memory context when appending. In `useTasks.js` fallback path, bucket resolution order: Claude's suggestion → `memoryService.lookupEntity()` exact match → word-by-word memory scan → `Work / Advisory` default.
+
+**3. Memory Spine Always Consulted in Fallback (Fix 3)**
+When no matching parent is found, the fallback path now always runs a two-pass memory lookup before defaulting to `Work / Advisory`. Pass 1: exact entity match. Pass 2: word-by-word scan of full memory for any token longer than 2 characters. Toast shows "Created new task group for [name]".
+
+**4. Modal Mic Identical to Main App (Fix 4)**
+`handleMicToggle` in `SearchModal.jsx` now immediately sets `voiceStatus` to `'transcribing'` on tap-to-stop, matching the main app's button disable behavior. Also resets `pendingTranscription.current` to false on new recording start, preventing stuck state from prior sessions.
+
+**5. Delete List Voice and Touch (Fix 5)**
+Voice: added explicit DELETE examples to Claude prompt. Improved matching in `useTasks.js` to use three-pass fuzzy: exact match → includes → reverse includes. Toast on success and failure.
+Touch: `ListsView.jsx` now accepts `onDeleteList` prop. Each list card gets a trash icon (top-right, stopPropagation). Tapping trash shows inline confirmation: "Delete [name]? Cannot be undone." with red Delete and Cancel buttons. Converted card element from `<button>` to `<div>` to allow nested button controls. Wired in `App.jsx` with toast.
+
+**6. Reformat Existing Tasks to Subject-First Format (Fix 6)**
+Created `scripts/reformat-tasks.js`. Fetches all `active`/`rolled` top-level tasks, sends each to Claude with reformatting instruction, updates Supabase in batches of 5 with 500ms delays. Logs original → reformatted for each changed task. Migration completed: 13 tasks reformatted, 7 already in correct format.
+
+**7. Priority Calibration (Fix 7)**
+Updated `userConfig.js` `priorityRules`: CRITICAL now requires explicit language only ("must do today", "critical", "urgent", "drop everything", "before I leave today", "cannot wait") — removed "high priority" and "ASAP" from CRITICAL. HIGH now captures "important", "high priority", "need to get this done today", "ASAP". NORMAL is the explicit default for all action words without urgency. Added explicit rule to Claude system prompt: "NEVER infer urgency from the type of task or importance of the client. ONLY explicit user language determines priority above NORMAL."
+
+**Files modified:** `src/services/claudeService.js`, `src/hooks/useTasks.js`, `src/services/taskService.js`, `src/config/userConfig.js`, `src/components/SearchModal.jsx`, `src/pages/ListsView.jsx`, `src/App.jsx`, `src/App.css`
+**Files created:** `scripts/reformat-tasks.js`
