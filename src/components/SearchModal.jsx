@@ -15,6 +15,8 @@ export default function SearchModal({
   onToggleCore,
   onAddItem,
   onVoiceCommand,
+  onVoiceListCommand,
+  showToast,
   memory,
 }) {
   const [addText, setAddText] = useState('')
@@ -107,8 +109,10 @@ export default function SearchModal({
           }
         }
 
-        // Process through global pipeline
-        if (onVoiceCommand) {
+        // Route to list-context pipeline when in list mode, otherwise global pipeline
+        if (modal.type === 'list' && modal.listId && onVoiceListCommand) {
+          await onVoiceListCommand(transcript, modal.listId, modal.title)
+        } else if (onVoiceCommand) {
           await onVoiceCommand(transcript)
         }
       } finally {

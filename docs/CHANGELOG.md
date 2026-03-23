@@ -131,3 +131,31 @@ Updated Claude system prompt with an absolute MODAL RULE: all queries (show me, 
 
 **Files created:** `src/config/listTemplates.js`
 **Files modified:** `src/services/claudeService.js`, `src/hooks/useTasks.js`, `src/components/SearchModal.jsx`, `src/App.jsx`, `src/App.css`, `docs/CHANGELOG.md`
+
+---
+
+## 2026-03-23
+
+### Fix Batch — Date Lookup, Day Filtering, Modal List Voice, Delete List, Toast System, Subject-First Format
+
+Six targeted fixes across the NLP layer, voice pipeline, and UI:
+
+**1. Complete Date Lookup Table (Fix 1)**
+Expanded `getChicagoDateContext()` in `claudeService.js` to pre-compute ALL date values: today, yesterday, tomorrow, all 7 weekdays (strictly next occurrence), thisWeekFriday (inclusive), endOfThisWeek (inclusive), nextWeekStart, nextWeekEnd. Now exported so it can be imported by `useTasks.js`. Injected as a full named lookup table into Claude's system prompt — Claude looks up dates from the table, never calculates independently. All voiceCorrection reschedule values flow through the same table.
+
+**2. Day-Specific Modal Filtering (Fix 2)**
+Updated modal filter logic in `useTasks.js` to use `getChicagoDateContext().dates` as the single source of truth. Added `timeRange` values: 'monday' through 'sunday' (each maps to that specific date), 'next-week', and refined 'today'/'tomorrow' to active-only status. Added `timeOfDay` sub-filter: parses `{ start: "HH:MM", end: "HH:MM" }` from navigationIntent and filters tasks by scheduledTime. Claude prompt updated to detect time-of-day queries.
+
+**3. Mic Inside Modal Routes to List Context (Fix 3)**
+When the SearchModal is open in list mode and the mic is used, voice now routes to `onVoiceListCommand` instead of the global `onVoiceCommand`. Added `parseListCommand()` export to `claudeService.js` — focused system prompt that always returns listIntent for add/check/remove/done. Added `handleListVoiceCommand()` in `App.jsx` that calls `parseListCommand`, processes the listIntent, and updates modal state optimistically. Added `onVoiceListCommand` and `showToast` props to SearchModal.
+
+**4. Delete List by Voice (Fix 4)**
+Added 'delete' as a valid listIntent action in Claude prompt. Added handler in `useTasks.js` listIntent section that calls `listService.deleteList()` (confirmed real DELETE, not soft-delete) and refreshes lists. Toast shown on deletion.
+
+**5. Toast Confirmation System (Fix 5)**
+Added `toast` state and `showToast(message, type)` to `App.jsx`. Toast renders as a fixed pill at top of screen (below header) with smooth fade-in animation, auto-clears after 2.5 seconds, never requires dismissal, never blocks interaction. Three types: success (gold text + checkmark), error (red + X), info (white). Wired to: task creation, voice corrections, all listIntent actions, list voice commands. `showToast` passed to `useTasks` hook as a parameter.
+
+**6. Subject-First Task Format (Fix 6)**
+Added TASK FORMAT RULE to Claude's system prompt: every task must be formatted as [Subject]: [concise action]. Subject = primary person/entity/thing. Action = 3-6 words, no filler. Examples provided for common input patterns. Applied to all tasks in newTasks and subtaskGroups.
+
+**Files modified:** `src/services/claudeService.js`, `src/hooks/useTasks.js`, `src/components/SearchModal.jsx`, `src/App.jsx`, `src/App.css`, `docs/CHANGELOG.md`

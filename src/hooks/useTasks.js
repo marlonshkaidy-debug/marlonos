@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import * as taskService from '../services/taskService'
 import * as memoryService from '../services/memoryService'
 import * as listService from '../services/listService'
-import { parseInput } from '../services/claudeService'
+import { parseInput, getChicagoDateContext } from '../services/claudeService'
 import { logTranscript, linkTaskIds } from '../services/transcriptService'
 import { sortTasks } from '../utils/sort'
 import userConfig from '../config/userConfig'
 
-export function useTasks() {
+export function useTasks(showToast) {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [bucketVersion, setBucketVersion] = useState(0)
@@ -90,6 +90,7 @@ export function useTasks() {
             lastAddedTaskIds.current = []
           }
           await refresh()
+          if (showToast) showToast('Cancelled', 'info')
           return result.response || 'Done — cancelled the last tasks.'
         }
 
@@ -113,9 +114,11 @@ export function useTasks() {
               await taskService.updateTask(lastId, updates)
             } catch (err) {
               console.error('[VoiceCorrection] Failed to update task:', lastId, err)
+              if (showToast) showToast('Something went wrong', 'error')
             }
           }
           await refresh()
+          if (showToast) showToast('Updated', 'success')
           return result.response || 'Updated.'
         }
       }
@@ -273,6 +276,7 @@ export function useTasks() {
             if (listsRefreshRef.current) listsRefreshRef.current()
             // Navigate to Lists tab so the user sees the new list
             setNavigationTarget('lists')
+            if (showToast) showToast(`${li.listName} list created`, 'success')
           }
 
           if (li.action === 'add' && li.listName) {
@@ -286,6 +290,7 @@ export function useTasks() {
                 await listService.addItem(match.id, li.items[i], false, existingCount + i)
               }
               if (listsRefreshRef.current) listsRefreshRef.current()
+              if (showToast) showToast(`Added to ${match.name}`, 'success')
             }
           }
 
@@ -347,6 +352,7 @@ export function useTasks() {
               await listService.checkAllItems(match.id)
               listService.promoteCoreItems(match.id).catch(() => {})
               if (listsRefreshRef.current) listsRefreshRef.current()
+              if (showToast) showToast(`${match.name} completed`, 'success')
             }
           }
 
@@ -358,6 +364,19 @@ export function useTasks() {
             if (match) {
               await listService.archiveList(match.id)
               if (listsRefreshRef.current) listsRefreshRef.current()
+              if (showToast) showToast(`${match.name} archived`, 'success')
+            }
+          }
+
+          if (li.action === 'delete' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              (l) => l.name.toLowerCase() === li.listName.toLowerCase()
+            )
+            if (match) {
+              await listService.deleteList(match.id)
+              if (listsRefreshRef.current) listsRefreshRef.current()
+              if (showToast) showToast(`${match.name} deleted`, 'success')
             }
           }
 
@@ -378,6 +397,7 @@ export function useTasks() {
           }
         } catch (err) {
           console.error('[ListIntent] Failed to process list intent:', err)
+          if (showToast) showToast('Something went wrong', 'error')
         }
       }
 
@@ -498,14 +518,9 @@ export function useTasks() {
             }
           } else {
             // Task modal — pure JS filtering, zero API calls
-            const now = new Date()
-            const todayStr = now.toLocaleDateString('en-CA', { timeZone: userConfig.timeZone })
-            const [cy, cm, cd] = todayStr.split('-').map(Number)
-            const pad = (n) => String(n).padStart(2, '0')
-            const fmtDate = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
-            const tomorrowStr = fmtDate(new Date(cy, cm - 1, cd + 1))
-            const weekEndStr = fmtDate(new Date(cy, cm - 1, cd + 7))
-            const todayMidnight = new Date(cy, cm - 1, cd).getTime()
+            // Use getChicagoDateContext() as the single source of truth for all dates
+            const { dates } = getChicagoDateContext()
+            const todayMidnight = new Date(dates.today).getTime()
 
             let filtered = [...tasks]
 
@@ -514,18 +529,57 @@ export function useTasks() {
                 if (t.status !== 'completed' || !t.completedAt) return false
                 return new Date(t.completedAt).getTime() >= todayMidnight
               })
+            } else if (filter.timeRange === 'overdue') {
+              filtered = filtered.filter(t =>
+                (t.status === 'active' || t.status === 'rolled') &&
+                t.dueDate && t.dueDate < dates.today
+              )
             } else {
-              // Active/rolled tasks only
-              filtered = filtered.filter(t => t.status === 'active' || t.status === 'rolled')
+              // Active tasks only for all date-based filters
+              if (filter.timeRange === 'today' || filter.timeRange === 'tomorrow') {
+                filtered = filtered.filter(t => t.status === 'active')
+              } else {
+                filtered = filtered.filter(t => t.status === 'active' || t.status === 'rolled')
+              }
 
               if (filter.timeRange === 'today') {
-                filtered = filtered.filter(t => t.dueDate === todayStr)
+                filtered = filtered.filter(t => t.dueDate === dates.today)
               } else if (filter.timeRange === 'tomorrow') {
-                filtered = filtered.filter(t => t.dueDate === tomorrowStr)
+                filtered = filtered.filter(t => t.dueDate === dates.tomorrow)
               } else if (filter.timeRange === 'this-week') {
-                filtered = filtered.filter(t => t.dueDate >= todayStr && t.dueDate <= weekEndStr)
-              } else if (filter.timeRange === 'overdue') {
-                filtered = filtered.filter(t => t.dueDate && t.dueDate < todayStr)
+                filtered = filtered.filter(t => t.dueDate >= dates.today && t.dueDate <= dates.endOfThisWeek)
+              } else if (filter.timeRange === 'next-week') {
+                filtered = filtered.filter(t => t.dueDate >= dates.nextWeekStart && t.dueDate <= dates.nextWeekEnd)
+              } else if (filter.timeRange === 'monday') {
+                filtered = filtered.filter(t => t.dueDate === dates.monday)
+              } else if (filter.timeRange === 'tuesday') {
+                filtered = filtered.filter(t => t.dueDate === dates.tuesday)
+              } else if (filter.timeRange === 'wednesday') {
+                filtered = filtered.filter(t => t.dueDate === dates.wednesday)
+              } else if (filter.timeRange === 'thursday') {
+                filtered = filtered.filter(t => t.dueDate === dates.thursday)
+              } else if (filter.timeRange === 'friday') {
+                filtered = filtered.filter(t => t.dueDate === dates.friday)
+              } else if (filter.timeRange === 'saturday') {
+                filtered = filtered.filter(t => t.dueDate === dates.saturday)
+              } else if (filter.timeRange === 'sunday') {
+                filtered = filtered.filter(t => t.dueDate === dates.sunday)
+              }
+
+              // Time-of-day filtering
+              if (filter.timeOfDay && (filter.timeOfDay.start || filter.timeOfDay.end)) {
+                const toMinutes = (hhmm) => {
+                  const [h, m] = hhmm.split(':').map(Number)
+                  return h * 60 + m
+                }
+                const startMin = filter.timeOfDay.start ? toMinutes(filter.timeOfDay.start) : 0
+                const endMin = filter.timeOfDay.end ? toMinutes(filter.timeOfDay.end) : 23 * 60 + 59
+                filtered = filtered.filter(t => {
+                  if (!t.scheduledTime) return false
+                  const taskDate = new Date(t.scheduledTime)
+                  const taskMin = taskDate.getHours() * 60 + taskDate.getMinutes()
+                  return taskMin >= startMin && taskMin <= endMin
+                })
               }
             }
 
@@ -579,6 +633,12 @@ export function useTasks() {
       }
 
       await refresh()
+
+      // Toast for new tasks/subtasks added
+      if (createdTaskIds.length > 0 && !listIntentHandled) {
+        const msg = result.response || `Added ${createdTaskIds.length} task${createdTaskIds.length !== 1 ? 's' : ''}`
+        if (showToast) showToast(msg, 'success')
+      }
 
       // Fire-and-forget: link task IDs to transcript in background
       transcriptPromise.then((transcriptId) => {
@@ -648,5 +708,6 @@ export function useTasks() {
     filterTo,
     searchFor,
     clearSearch,
+    showToast,
   }
 }

@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useTasks } from './hooks/useTasks'
 import { useLists } from './hooks/useLists'
 import { useMemory } from './hooks/useMemory'
 import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
+import { parseListCommand } from './services/claudeService'
 import { updateTask } from './services/taskService'
+import * as memoryService from './services/memoryService'
+import * as listService from './services/listService'
 import userConfig from './config/userConfig'
 import { formatTime, getDueDateLabel, getDateSection, getUpcomingGroup, getDaysOverdue } from './utils/time'
 import ListsView from './pages/ListsView'
@@ -16,6 +19,16 @@ const ALL_FILTER = 'All'
 const PRIORITY_ORDER = { critical: 0, high: 1, normal: 2, low: 3 }
 
 function App() {
+  // Toast system — defined first so showToast can be passed to useTasks
+  const [toast, setToast] = useState(null)
+  const toastTimerRef = useRef(null)
+
+  const showToast = useCallback((message, type = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ message, type })
+    toastTimerRef.current = setTimeout(() => setToast(null), 2500)
+  }, [])
+
   const {
     tasks, loading, addFromText, complete, bucketVersion,
     pendingDeleteBucket, setPendingDeleteBucket,
@@ -25,7 +38,7 @@ function App() {
     reRecordRequested, setReRecordRequested,
     searchModal, setSearchModal,
     listsRefreshRef,
-  } = useTasks()
+  } = useTasks(showToast)
   const {
     activeLists,
     loading: listsLoading,
@@ -192,6 +205,85 @@ function App() {
     }
   }
 
+  const handleListVoiceCommand = useCallback(async (transcript, listId, listName) => {
+    try {
+      let memoryContext = []
+      try {
+        memoryContext = await memoryService.getMemory()
+      } catch (_) { /* silent */ }
+
+      const result = await parseListCommand(transcript, listId, listName, memoryContext)
+      const li = result?.listIntent
+      if (!li || !li.action) return
+
+      if (li.action === 'add' && li.items?.length) {
+        const fullList = await listService.getList(listId)
+        const existingCount = (fullList?.list_items || []).length
+        for (let i = 0; i < li.items.length; i++) {
+          await listService.addItem(listId, li.items[i], false, existingCount + i)
+        }
+        const updated = await listService.getList(listId)
+        if (updated) {
+          setSearchModal((prev) => ({ ...prev, data: updated.list_items || [] }))
+        }
+        showToast(`Added to ${listName}`, 'success')
+      }
+
+      if (li.action === 'check' && li.markDone?.length) {
+        const fullList = await listService.getList(listId)
+        for (const doneText of li.markDone) {
+          const item = (fullList?.list_items || []).find(
+            (i) => i.text.toLowerCase().includes(doneText.toLowerCase()) && !i.is_checked
+          )
+          if (item) {
+            await listService.checkItem(item.id)
+            setSearchModal((prev) => ({
+              ...prev,
+              data: prev.data.map((d) =>
+                d.id === item.id ? { ...d, is_checked: true, checked_at: new Date().toISOString() } : d
+              ),
+            }))
+          }
+        }
+        showToast('Checked off', 'success')
+      }
+
+      if (li.action === 'remove' && li.removeItems?.length) {
+        const fullList = await listService.getList(listId)
+        for (const removeText of li.removeItems) {
+          const item = (fullList?.list_items || []).find(
+            (i) => i.text.toLowerCase().includes(removeText.toLowerCase())
+          )
+          if (item) {
+            await listService.deleteItem(item.id)
+            setSearchModal((prev) => ({
+              ...prev,
+              data: prev.data.filter((d) => d.id !== item.id),
+            }))
+          }
+        }
+        showToast('Removed', 'success')
+      }
+
+      if (li.action === 'done') {
+        await listService.checkAllItems(listId)
+        listService.promoteCoreItems(listId).catch(() => {})
+        setSearchModal((prev) => ({
+          ...prev,
+          data: prev.data.map((d) => ({
+            ...d,
+            is_checked: true,
+            checked_at: d.checked_at || new Date().toISOString(),
+          })),
+        }))
+        showToast(`${listName} completed`, 'success')
+      }
+    } catch (err) {
+      console.error('[ListVoiceCommand] Failed:', err)
+      showToast('Something went wrong', 'error')
+    }
+  }, [showToast, setSearchModal])
+
   // Filter tasks: exclude subtasks from top-level, apply bucket + search
   const filteredTasks = useMemo(() => {
     let topLevel = tasks.filter((t) => !t.parent_task_id)
@@ -297,6 +389,15 @@ function App() {
 
   return (
     <>
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`toast-pill toast-${toast.type}`}>
+          {toast.type === 'success' && <span className="toast-icon">&#10003;</span>}
+          {toast.type === 'error' && <span className="toast-icon">&times;</span>}
+          <span className="toast-message">{toast.message}</span>
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="top-bar">
         <div className="top-bar-row">
@@ -555,6 +656,8 @@ function App() {
         modal={searchModal}
         onClose={() => setSearchModal({ isOpen: false, title: '', type: 'tasks', data: [], listId: null, query: null })}
         onVoiceCommand={addFromText}
+        onVoiceListCommand={handleListVoiceCommand}
+        showToast={showToast}
         memory={memory}
         onCheckItem={(itemId, listId) => {
           checkListItem(itemId, listId)
