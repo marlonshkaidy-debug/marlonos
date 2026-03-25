@@ -7,7 +7,7 @@ import { logTranscript, linkTaskIds } from '../services/transcriptService'
 import { sortTasks } from '../utils/sort'
 import userConfig from '../config/userConfig'
 
-export function useTasks(showToast) {
+export function useTasks(showToast, appStateRef) {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [bucketVersion, setBucketVersion] = useState(0)
@@ -18,6 +18,7 @@ export function useTasks(showToast) {
   const [reRecordRequested, setReRecordRequested] = useState(false)
   const [searchModal, setSearchModal] = useState({ isOpen: false, title: '', type: 'tasks', data: [], listId: null, query: null })
   const lastAddedTaskIds = useRef([])
+  const lastBulkOpRef = useRef(null) // { snapshots: [{id, originalValues}], timestamp }
   // Ref to allow list refresh callback from outside
   const listsRefreshRef = useRef(null)
 
@@ -46,10 +47,12 @@ export function useTasks(showToast) {
         // Memory fails silently — never blocks main flow
       }
 
+      const appState = appStateRef?.current || null
       const { parsed: result, rawTranscript, rawResponse } = await parseInput(
         text,
         tasks,
-        memoryContext
+        memoryContext,
+        appState
       )
 
       // === DIAGNOSTIC LOGS (temporary) ===
@@ -78,7 +81,24 @@ export function useTasks(showToast) {
           return result.response || 'Go ahead, re-record your input.'
         }
 
-        if (vc.type === 'cancel') {
+        if (vc.type === 'cancel' || vc.type === 'undo') {
+          // Check for fresh bulk undo first (within 30 seconds)
+          const bulkOp = lastBulkOpRef.current
+          if (bulkOp && Date.now() - bulkOp.timestamp < 30000) {
+            console.log('[Undo] Restoring', bulkOp.snapshots.length, 'tasks from bulk op')
+            for (const snap of bulkOp.snapshots) {
+              try {
+                await taskService.updateTask(snap.id, snap.originalValues)
+              } catch (err) {
+                console.error('[Undo] Failed to restore task:', snap.id, err)
+              }
+            }
+            lastBulkOpRef.current = null
+            await refresh()
+            if (showToast) showToast(`Undone — ${bulkOp.snapshots.length} tasks restored`, 'success')
+            return result.response || 'Undone.'
+          }
+
           if (lastAddedTaskIds.current.length > 0) {
             for (const id of lastAddedTaskIds.current) {
               try {
@@ -130,6 +150,126 @@ export function useTasks(showToast) {
           userConfig.addVocabularyTerm(term, definition)
           console.log('[Vocabulary] Added:', term, '→', definition)
         }
+      }
+
+      // === BULK OPERATION ===
+      if (result.bulkOperation) {
+        const bo = result.bulkOperation
+        const filter = bo.filter || {}
+        const { dates } = getChicagoDateContext()
+        const todayMidnight = new Date(dates.today).getTime()
+
+        // Build filtered task list in JS
+        let bulkTargets = tasks.filter(t => !t.parent_task_id) // top-level only
+
+        // Status filter
+        if (filter.status === 'completed') {
+          bulkTargets = bulkTargets.filter(t => t.status === 'completed')
+        } else if (filter.timeRange === 'overdue') {
+          bulkTargets = bulkTargets.filter(t =>
+            (t.status === 'active' || t.status === 'rolled') && t.dueDate && t.dueDate < dates.today
+          )
+        } else if (filter.timeRange === 'today') {
+          bulkTargets = bulkTargets.filter(t => t.status === 'active' && t.dueDate === dates.today)
+        } else if (filter.timeRange === 'tomorrow') {
+          bulkTargets = bulkTargets.filter(t => t.status === 'active' && t.dueDate === dates.tomorrow)
+        } else if (filter.timeRange === 'this-week') {
+          bulkTargets = bulkTargets.filter(t =>
+            (t.status === 'active' || t.status === 'rolled') &&
+            t.dueDate >= dates.today && t.dueDate <= dates.endOfThisWeek
+          )
+        } else {
+          // Default: active tasks
+          bulkTargets = bulkTargets.filter(t => t.status === 'active' || t.status === 'rolled')
+        }
+
+        if (filter.bucket) {
+          bulkTargets = bulkTargets.filter(t => t.bucket.toLowerCase() === filter.bucket.toLowerCase())
+        }
+        if (filter.priority) {
+          bulkTargets = bulkTargets.filter(t => t.priority === filter.priority)
+        }
+        if (filter.rollCount != null) {
+          bulkTargets = bulkTargets.filter(t => (t.roll_count || 0) >= filter.rollCount)
+        }
+
+        const targetIds = bulkTargets.map(t => t.id)
+        if (targetIds.length > 0) {
+          // Store snapshots for undo
+          const snapshots = bulkTargets.map(t => ({
+            id: t.id,
+            originalValues: {
+              dueDate: t.dueDate,
+              status: t.status,
+              priority: t.priority,
+              mustDoToday: t.mustDoToday,
+              archivedAt: t.archivedAt,
+            },
+          }))
+          lastBulkOpRef.current = { snapshots, timestamp: Date.now() }
+
+          try {
+            if (bo.action === 'reschedule' && bo.newValue?.dueDate) {
+              await taskService.bulkReschedule(targetIds, bo.newValue.dueDate)
+            } else if (bo.action === 'complete') {
+              await taskService.bulkComplete(targetIds)
+            } else if (bo.action === 'priority' && bo.newValue?.priority) {
+              await taskService.bulkUpdatePriority(targetIds, bo.newValue.priority)
+            } else if (bo.action === 'archive') {
+              await taskService.bulkArchive(targetIds)
+            }
+            await refresh()
+            if (showToast) showToast(`${targetIds.length} task${targetIds.length !== 1 ? 's' : ''} updated`, 'success')
+          } catch (err) {
+            console.error('[BulkOp] Failed:', err)
+            if (showToast) showToast('Bulk update failed', 'error')
+          }
+        } else {
+          if (showToast) showToast('No matching tasks found', 'info')
+        }
+        return result.response
+      }
+
+      // === MEMORY QUERY ===
+      if (result.memoryQuery) {
+        const mq = result.memoryQuery
+        if (mq.action === 'lookup' && mq.entityName) {
+          const entity = await memoryService.lookupEntity(mq.entityName)
+          if (entity) {
+            setSearchModal({
+              isOpen: true,
+              title: `Memory: ${entity.entity_name}`,
+              type: 'memory',
+              data: [entity],
+              listId: null,
+              query: null,
+            })
+          } else {
+            setSearchModal({
+              isOpen: true,
+              title: `Memory: ${mq.entityName}`,
+              type: 'memory',
+              data: [],
+              listId: null,
+              query: mq.entityName,
+            })
+          }
+        } else if (mq.action === 'update' && mq.entityName && mq.newBucket) {
+          await memoryService.confirmEntity(mq.entityName, mq.newBucket)
+          if (showToast) showToast(`${mq.entityName} → ${mq.newBucket}`, 'success')
+        } else if (mq.action === 'vocabulary') {
+          const vocab = userConfig.personalVocabulary
+          const vocabItems = Object.entries(vocab).map(([term, def]) => ({ term, definition: def }))
+          setSearchModal({
+            isOpen: true,
+            title: 'Your Vocabulary',
+            type: 'vocabulary',
+            data: vocabItems,
+            listId: null,
+            query: null,
+          })
+        }
+        return result.response
       }
 
       // Process newBuckets: add dynamic buckets at runtime
@@ -434,6 +574,72 @@ export function useTasks(showToast) {
               })
             }
           }
+
+          if (li.action === 'query-all') {
+            const allLists = await listService.getLists()
+            const listSummaries = allLists.map(l => ({
+              id: l.id,
+              name: l.name,
+              type: l.type,
+              itemCount: (l.list_items || []).length,
+              checkedCount: (l.list_items || []).filter(i => i.is_checked).length,
+            }))
+            setSearchModal({
+              isOpen: true,
+              title: 'My Lists',
+              type: 'list-summary',
+              data: listSummaries,
+              listId: null,
+              query: null,
+            })
+          }
+
+          if (li.action === 'query-archived') {
+            const archived = await listService.getArchivedLists()
+            const listSummaries = archived.map(l => ({
+              id: l.id,
+              name: l.name,
+              type: l.type,
+              itemCount: (l.list_items || []).length,
+              checkedCount: (l.list_items || []).filter(i => i.is_checked).length,
+              isArchived: true,
+            }))
+            setSearchModal({
+              isOpen: true,
+              title: 'Archived Lists',
+              type: 'list-summary',
+              data: listSummaries,
+              listId: null,
+              query: null,
+            })
+          }
+
+          if (li.action === 'rename' && li.listName && li.newName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              l => l.name.toLowerCase() === li.listName.toLowerCase() ||
+                   l.name.toLowerCase().includes(li.listName.toLowerCase())
+            )
+            if (match) {
+              await listService.renameList(match.id, li.newName)
+              if (listsRefreshRef.current) listsRefreshRef.current()
+              if (showToast) showToast(`Renamed to ${li.newName}`, 'success')
+            } else {
+              if (showToast) showToast(`List "${li.listName}" not found`, 'error')
+            }
+          }
+
+          if (li.action === 'count' && li.listName) {
+            const allLists = await listService.getLists()
+            const match = allLists.find(
+              l => l.name.toLowerCase().includes(li.listName.toLowerCase())
+            )
+            if (match) {
+              const count = (match.list_items || []).length
+              const checked = (match.list_items || []).filter(i => i.is_checked).length
+              if (showToast) showToast(`${match.name}: ${count} items (${checked} checked)`, 'info')
+            }
+          }
         } catch (err) {
           console.error('[ListIntent] Failed to process list intent:', err)
           if (showToast) showToast('Something went wrong', 'error')
@@ -525,6 +731,19 @@ export function useTasks(showToast) {
       // Process extended navigationIntent
       if (result.navigationIntent) {
         const ni = result.navigationIntent
+
+        // Close modal
+        if (ni.action === 'close-modal') {
+          setSearchModal({ isOpen: false, title: '', type: 'tasks', data: [], listId: null, query: null })
+          return result.response
+        }
+
+        // Clear all filters (not a modal)
+        if (ni.action === 'clear-filters') {
+          setNavigationIntent({ action: 'filter', target: 'tasks', filter: 'all' })
+          return result.response
+        }
+
         if (ni.action === 'modal') {
           const filter = ni.filter || {}
 
@@ -568,6 +787,23 @@ export function useTasks(showToast) {
                 if (t.status !== 'completed' || !t.completedAt) return false
                 return new Date(t.completedAt).getTime() >= todayMidnight
               })
+            } else if (filter.timeRange === 'today-summary') {
+              const todayActive = filtered.filter(t =>
+                (t.status === 'active' || t.status === 'rolled') && t.dueDate === dates.today
+              )
+              const todayCompleted = filtered.filter(t => {
+                if (t.status !== 'completed' || !t.completedAt) return false
+                return new Date(t.completedAt).getTime() >= todayMidnight
+              })
+              filtered = [...todayActive, ...todayCompleted]
+            } else if (filter.timeRange === 'keeps-rolling') {
+              filtered = filtered.filter(t =>
+                (t.status === 'active' || t.status === 'rolled') && (t.roll_count || 0) >= 3
+              )
+              filtered.sort((a, b) => (b.roll_count || 0) - (a.roll_count || 0))
+            } else if (filter.timeRange === 'oldest') {
+              filtered = filtered.filter(t => t.status === 'active' || t.status === 'rolled')
+              filtered.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
             } else if (filter.timeRange === 'overdue') {
               filtered = filtered.filter(t =>
                 (t.status === 'active' || t.status === 'rolled') &&
@@ -635,6 +871,15 @@ export function useTasks(showToast) {
             if (filter.searchTerm) {
               const term = filter.searchTerm.toLowerCase()
               filtered = filtered.filter(t => t.text.toLowerCase().includes(term))
+            }
+
+            if (filter.rollCount != null) {
+              filtered = filtered.filter(t => (t.roll_count || 0) >= filter.rollCount)
+            }
+
+            // Sort by oldest if requested (when not already sorted by keeps-rolling)
+            if (filter.sort === 'oldest' && filter.timeRange !== 'keeps-rolling') {
+              filtered.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
             }
 
             // Exclude subtasks from results

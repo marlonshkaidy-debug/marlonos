@@ -6,11 +6,12 @@ import { useVoiceRecorder } from './hooks/useVoiceRecorder'
 import { useMicPermission } from './hooks/useMicPermission'
 import { transcribeAudio } from './services/whisperService'
 import { parseListCommand } from './services/claudeService'
-import { updateTask } from './services/taskService'
+import { updateTask, deleteTask } from './services/taskService'
 import * as memoryService from './services/memoryService'
 import * as listService from './services/listService'
 import userConfig from './config/userConfig'
 import { formatTime, getDueDateLabel, getDateSection, getUpcomingGroup, getDaysOverdue } from './utils/time'
+import { getChicagoDateContext } from './services/claudeService'
 import ListsView from './pages/ListsView'
 import SearchModal from './components/SearchModal'
 import './App.css'
@@ -29,8 +30,11 @@ function App() {
     toastTimerRef.current = setTimeout(() => setToast(null), 2500)
   }, [])
 
+  // App state ref — injected into Claude's system prompt for contextual awareness
+  const appStateRef = useRef(null)
+
   const {
-    tasks, loading, addFromText, complete, bucketVersion,
+    tasks, loading, addFromText, complete, refresh: refreshTasks, bucketVersion,
     pendingDeleteBucket, setPendingDeleteBucket,
     navigationTarget, setNavigationTarget,
     navigationIntent, setNavigationIntent,
@@ -38,7 +42,7 @@ function App() {
     reRecordRequested, setReRecordRequested,
     searchModal, setSearchModal,
     listsRefreshRef,
-  } = useTasks(showToast)
+  } = useTasks(showToast, appStateRef)
   const {
     activeLists,
     loading: listsLoading,
@@ -63,6 +67,19 @@ function App() {
   const [overdueCollapsed, setOverdueCollapsed] = useState(false)
   const [upcomingCollapsed, setUpcomingCollapsed] = useState(false)
   const [completedCollapsed, setCompletedCollapsed] = useState(true)
+
+  // Task update/delete handlers for nudge banner (rolling tasks)
+  const handleNudgeDelete = useCallback(async (taskId) => {
+    await deleteTask(taskId)
+    await refreshTasks()
+    showToast('Task removed', 'success')
+  }, [refreshTasks, showToast])
+
+  const handleNudgeSchedule = useCallback(async (taskId, newDueDate) => {
+    await updateTask(taskId, { dueDate: newDueDate, status: 'active' })
+    await refreshTasks()
+    showToast('Scheduled', 'success')
+  }, [refreshTasks, showToast])
 
   const micPermission = useMicPermission()
   const { isRecording, audioBlob, error: recorderError, startRecording, stopRecording } = useVoiceRecorder()
@@ -353,6 +370,25 @@ function App() {
     return { overdueTasks: overdue, todayTasks: today, upcomingGroups: groups, completedTasks: completed }
   }, [filteredTasks])
 
+  // Keep appStateRef current so Claude has live context
+  useEffect(() => {
+    const { dates } = getChicagoDateContext()
+    const todayMidnight = new Date(dates.today).getTime()
+    const completedTodayCount = completedTasks.filter(t =>
+      t.completedAt && new Date(t.completedAt).getTime() >= todayMidnight
+    ).length
+    const upcomingCount = upcomingGroups.reduce((sum, g) => sum + g.tasks.length, 0)
+    appStateRef.current = {
+      overdueCount: overdueTasks.length,
+      todayCount: todayTasks.length,
+      upcomingCount,
+      completedTodayCount,
+      activeFilter: activeBucket !== ALL_FILTER ? activeBucket : null,
+      currentView: activeNav,
+      openModalTitle: searchModal.isOpen ? searchModal.title : null,
+    }
+  }, [overdueTasks, todayTasks, upcomingGroups, completedTasks, activeBucket, activeNav, searchModal])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     const text = input.trim()
@@ -475,6 +511,8 @@ function App() {
                             task={task}
                             subtasks={subtaskMap[task.id] || []}
                             onComplete={complete}
+                            onDelete={handleNudgeDelete}
+                            onUpdate={handleNudgeSchedule}
                             isOverdue
                           />
                         ))}
@@ -495,6 +533,8 @@ function App() {
                             task={task}
                             subtasks={subtaskMap[task.id] || []}
                             onComplete={complete}
+                            onDelete={handleNudgeDelete}
+                            onUpdate={handleNudgeSchedule}
                           />
                         ))}
                       </div>
@@ -521,6 +561,8 @@ function App() {
                                 task={task}
                                 subtasks={subtaskMap[task.id] || []}
                                 onComplete={complete}
+                                onDelete={handleNudgeDelete}
+                                onUpdate={handleNudgeSchedule}
                               />
                             ))}
                           </div>
@@ -546,6 +588,8 @@ function App() {
                             task={task}
                             subtasks={subtaskMap[task.id] || []}
                             onComplete={complete}
+                            onDelete={handleNudgeDelete}
+                            onUpdate={handleNudgeSchedule}
                           />
                         ))}
                       </div>
@@ -758,18 +802,22 @@ function App() {
   )
 }
 
-function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
+function ParentTaskCard({ task, subtasks, onComplete, onDelete, onUpdate, isOverdue = false }) {
   const [expanded, setExpanded] = useState(false)
   const isParent = task.is_parent && subtasks.length > 0
   const hasLowConfidence = task.confidence === 'medium' || task.confidence === 'low'
 
   if (!isParent) {
-    return <TaskCard task={task} onComplete={onComplete} isOverdue={isOverdue} />
+    return <TaskCard task={task} onComplete={onComplete} onDelete={onDelete} onUpdate={onUpdate} isOverdue={isOverdue} />
   }
 
   const completedCount = subtasks.filter((s) => s.status === 'completed').length
   const totalCount = subtasks.length
   const allDone = task.status === 'completed'
+  const rollCount = task.roll_count || 0
+  const showRollFlag = rollCount >= 3
+  const rollFlagColor = rollCount >= 6 ? '#F97316' : '#EAB308'
+  const rollTextStyle = rollCount >= 6 ? { color: '#F97316', fontWeight: 600 } : rollCount >= 4 ? { color: '#EAB308' } : {}
 
   const bucketColor = isOverdue ? '#DC2626' : userConfig.getBucketColor(task.bucket)
   const dueDateLabel = getDueDateLabel(task.dueDate)
@@ -791,7 +839,8 @@ function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
           <span className="check-icon">&#10003;</span>
         </button>
         <div className="task-content">
-          <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`}>
+          <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`} style={rollTextStyle}>
+            {showRollFlag && <span className="roll-flag" style={{ color: rollFlagColor }}>⚑ </span>}
             {task.text}
             {hasLowConfidence && <span className="confidence-dot" title="Low confidence assignment">●</span>}
             <span className="subtask-progress">
@@ -805,6 +854,9 @@ function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
             >
               {task.bucket}
             </span>
+            {showRollFlag && (
+              <span className="roll-counter" style={{ color: rollFlagColor }}>Rolled {rollCount}x</span>
+            )}
             {dueDateLabel && (
               <span className="task-due-chip" style={{ color: dueDateLabel.color }}>
                 {dueDateLabel.text}
@@ -822,7 +874,7 @@ function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
       {expanded && (
         <div className="subtask-list">
           {subtasks.map((sub) => (
-            <TaskCard key={sub.id} task={sub} onComplete={onComplete} isSubtask isOverdue={isOverdue} />
+            <TaskCard key={sub.id} task={sub} onComplete={onComplete} onDelete={onDelete} onUpdate={onUpdate} isSubtask isOverdue={isOverdue} />
           ))}
         </div>
       )}
@@ -830,11 +882,52 @@ function ParentTaskCard({ task, subtasks, onComplete, isOverdue = false }) {
   )
 }
 
-function TaskCard({ task, onComplete, isSubtask = false, isOverdue = false }) {
+const NUDGE_KEY = (id) => `marlonos_roll_nudge_${id}`
+
+function TaskCard({ task, onComplete, onDelete, onUpdate, isSubtask = false, isOverdue = false }) {
   const isCritical = task.priority === 'critical'
   const isMustDo = task.mustDoToday
   const isCompleted = task.status === 'completed'
   const hasLowConfidence = task.confidence === 'medium' || task.confidence === 'low'
+  const rollCount = task.roll_count || 0
+
+  // Roll flag level
+  const showRollFlag = rollCount >= 3
+  const rollLevel = rollCount >= 6 ? 'orange' : rollCount >= 4 ? 'amber' : rollCount >= 3 ? 'amber-soft' : null
+  const rollFlagColor = rollCount >= 6 ? '#F97316' : '#EAB308'
+  const rollTextStyle = rollCount >= 6
+    ? { color: '#F97316', fontWeight: 600 }
+    : rollCount >= 4
+      ? { color: '#EAB308' }
+      : {}
+
+  // Nudge logic — show at roll_count 4, again at 8, 12, ...
+  const [nudgeDismissed, setNudgeDismissed] = useState(() => {
+    const stored = localStorage.getItem(NUDGE_KEY(task.id))
+    return stored ? parseInt(stored) : null
+  })
+  const [scheduling, setScheduling] = useState(false)
+  const [scheduleDate, setScheduleDate] = useState('')
+  const showNudge = !isSubtask && !isCompleted && rollCount >= 4 &&
+    (nudgeDismissed === null || rollCount >= nudgeDismissed + 4)
+
+  const handleKeep = () => {
+    localStorage.setItem(NUDGE_KEY(task.id), String(rollCount))
+    setNudgeDismissed(rollCount)
+  }
+
+  const handleRemove = () => {
+    if (onDelete) onDelete(task.id)
+  }
+
+  const handleScheduleConfirm = () => {
+    if (scheduleDate && onUpdate) {
+      onUpdate(task.id, scheduleDate)
+      localStorage.setItem(NUDGE_KEY(task.id), String(rollCount))
+      setNudgeDismissed(rollCount)
+      setScheduling(false)
+    }
+  }
 
   const classes = [
     'task-card',
@@ -852,47 +945,98 @@ function TaskCard({ task, onComplete, isSubtask = false, isOverdue = false }) {
   const daysOver = getDaysOverdue(task.dueDate)
 
   return (
-    <div className={classes}>
-      <button
-        className="task-checkbox"
-        onClick={() => !isCompleted && onComplete(task.id)}
-        aria-label={isCompleted ? 'Completed' : 'Mark complete'}
-      >
-        <span className="check-icon">&#10003;</span>
-      </button>
-      <div className="task-content">
-        <div className={`task-text ${isOverdue ? 'overdue-text' : ''}`}>
-          {task.text}
-          {hasLowConfidence && <span className="confidence-dot" title="Low confidence assignment">●</span>}
-          {isOverdue && daysOver > 0 && (
-            <span className="overdue-ago"> ({daysOver === 1 ? '1 day ago' : `${daysOver} days ago`})</span>
-          )}
-        </div>
-        <div className="task-meta">
-          {!isSubtask && (
-            <span
-              className="task-bucket"
-              style={{ background: `${bucketColor}20`, color: bucketColor }}
-            >
-              {task.bucket}
-            </span>
-          )}
-          {!isSubtask && dueDateLabel && (
-            <span className="task-due-chip" style={{ color: dueDateLabel.color }}>
-              {dueDateLabel.text}
-            </span>
-          )}
-          {task.priority !== 'normal' && (
-            <span className={`task-priority ${task.priority}`}>
-              {task.priority}
-            </span>
-          )}
-          {task.scheduledTime && (
-            <span className="task-time">{formatTime(task.scheduledTime)}</span>
-          )}
+    <>
+      <div className={classes}>
+        <button
+          className="task-checkbox"
+          onClick={() => !isCompleted && onComplete(task.id)}
+          aria-label={isCompleted ? 'Completed' : 'Mark complete'}
+        >
+          <span className="check-icon">&#10003;</span>
+        </button>
+        <div className="task-content">
+          <div
+            className={`task-text ${isOverdue ? 'overdue-text' : ''}`}
+            style={rollTextStyle}
+          >
+            {showRollFlag && (
+              <span className="roll-flag" style={{ color: rollFlagColor }}>⚑ </span>
+            )}
+            {task.text}
+            {hasLowConfidence && <span className="confidence-dot" title="Low confidence assignment">●</span>}
+            {isOverdue && daysOver > 0 && (
+              <span className="overdue-ago"> ({daysOver === 1 ? '1 day ago' : `${daysOver} days ago`})</span>
+            )}
+          </div>
+          <div className="task-meta">
+            {!isSubtask && (
+              <span
+                className="task-bucket"
+                style={{ background: `${bucketColor}20`, color: bucketColor }}
+              >
+                {task.bucket}
+              </span>
+            )}
+            {showRollFlag && rollCount >= 3 && (
+              <span className="roll-counter" style={{ color: rollFlagColor }}>
+                Rolled {rollCount}x
+              </span>
+            )}
+            {!isSubtask && dueDateLabel && (
+              <span className="task-due-chip" style={{ color: dueDateLabel.color }}>
+                {dueDateLabel.text}
+              </span>
+            )}
+            {task.priority !== 'normal' && (
+              <span className={`task-priority ${task.priority}`}>
+                {task.priority}
+              </span>
+            )}
+            {task.scheduledTime && (
+              <span className="task-time">{formatTime(task.scheduledTime)}</span>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Roll nudge banner — inline, below the card */}
+      {showNudge && (
+        <div className="roll-nudge">
+          <div className="roll-nudge-message">
+            This has rolled {rollCount} days in a row. Schedule it, remove it, or keep it?
+          </div>
+          {scheduling ? (
+            <div className="roll-nudge-schedule">
+              <input
+                type="date"
+                value={scheduleDate}
+                onChange={(e) => setScheduleDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+                className="roll-nudge-date-input"
+              />
+              <button className="roll-nudge-btn-gold" onClick={handleScheduleConfirm} disabled={!scheduleDate}>
+                Save
+              </button>
+              <button className="roll-nudge-btn-gray" onClick={() => setScheduling(false)}>
+                Back
+              </button>
+            </div>
+          ) : (
+            <div className="roll-nudge-actions">
+              <button className="roll-nudge-btn-gold" onClick={() => setScheduling(true)}>
+                Schedule
+              </button>
+              <button className="roll-nudge-btn-red" onClick={handleRemove}>
+                Remove
+              </button>
+              <button className="roll-nudge-btn-gray" onClick={handleKeep}>
+                Keep
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   )
 }
 

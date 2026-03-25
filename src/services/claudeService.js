@@ -133,7 +133,7 @@ scheduledTime must always include the timezone offset ${offset}`,
   }
 }
 
-function buildSystemPrompt(memoryContext, dateContext) {
+function buildSystemPrompt(memoryContext, dateContext, appState) {
   const { appName, userName, defaultBuckets, priorityRules } = userConfig
 
   const bucketLines = defaultBuckets
@@ -169,10 +169,19 @@ MEMORY RULES:
 `
   }
 
+  // App state block injected when available
+  let appStateBlock = ''
+  if (appState) {
+    const modalStr = appState.openModalTitle ? `Modal open: "${appState.openModalTitle}".` : ''
+    appStateBlock = `
+CURRENT APP STATE: ${appState.overdueCount} overdue, ${appState.todayCount} due today, ${appState.upcomingCount} upcoming, ${appState.completedTodayCount} completed today. Active filter: ${appState.activeFilter || 'none'}. Current view: ${appState.currentView}. ${modalStr}
+`
+  }
+
   return `${dateContext.headerLine}
 
 ${dateContext.dateResolution}
-
+${appStateBlock}
 You are ${appName}, a personal life organizer for ${userName}. You parse natural language input and return structured JSON to manage tasks.
 
 PERSONAL VOCABULARY & KNOWN PEOPLE:
@@ -207,11 +216,19 @@ Detect correction intents in user input. If the user is correcting a previous ac
 Correction triggers:
 - "that's wrong, redo it" / "redo that" → type: "redo" (wipe last input, re-prompt)
 - "never mind that last one" / "cancel that" / "ignore that" → type: "cancel" (delete most recently added tasks)
+- "undo that" / "undo the last change" → type: "undo" (undo last bulk operation if within 30 seconds, or cancel last tasks)
 - "actually [correction]" → type: "amend", value: the corrected text/field
 - "change that to [value]" → type: "amend", value: the new value
 - "make that [priority] priority" → type: "priority", value: the priority level
 - "that belongs in [bucket]" → type: "bucket", value: the bucket name
-- "move that to [date]" → type: "reschedule", value: "YYYY-MM-DD"
+- "move that to [date]" / "move [task] to [day]" / "schedule [task] for [day]" → type: "reschedule", targetDescription: partial match of task text, value: "YYYY-MM-DD" using DATE RESOLUTION table
+- "push [task] back one day" / "push [task] back" → type: "reschedule", targetDescription: partial match of task text, value: current task dueDate + 1 day (compute from DATE RESOLUTION)
+- "what day is [task] due?" → navigationIntent modal, filter: { searchTerm: "[task]" }, title: "[task] Due Date"
+
+DATE RESCHEDULE EXAMPLES:
+- "push the Sierra task back one day" → voiceCorrection: { type: "reschedule", targetDescription: "Sierra", value: tomorrow's date from DATE RESOLUTION }
+- "move the CE task to Friday" → voiceCorrection: { type: "reschedule", targetDescription: "CE", value: thisWeekFriday from DATE RESOLUTION }
+- "schedule the Damien meeting for next Monday" → voiceCorrection: { type: "reschedule", targetDescription: "Damien meeting", value: nextWeekStart from DATE RESOLUTION }
 
 VOCABULARY MANAGEMENT:
 If the user says "add to my vocabulary: [term] means [definition]" or similar, set vocabularyUpdate with the term and definition.
@@ -252,10 +269,36 @@ If the user says "delete the [bucket name] bucket", "remove the [bucket name] bu
 - Set "confirmed" to false initially. If the user says "confirm" in the context of a pending bucket deletion, set "confirmed" to true.
 - Default buckets (Work / Advisory, Coaching, Home / Personal, Ventures) CANNOT be deleted. If the user tries, set response to "That's a default bucket and cannot be deleted" and leave deleteBucket as null.
 
+BULK OPERATIONS:
+When the user issues a command affecting MULTIPLE tasks at once, set bulkOperation instead of individual task edits.
+bulkOperation schema: { "action": "reschedule|complete|priority|archive", "filter": { "bucket": "string|null", "timeRange": "overdue|today|tomorrow|this-week|null", "priority": "string|null", "rollCount": number|null, "status": "string|null" }, "newValue": { "dueDate": "YYYY-MM-DD|null", "priority": "string|null" } }
+
+BULK EXAMPLES — recognize and return bulkOperation for these:
+- "change all overdue tasks to today" → action: "reschedule", filter: { timeRange: "overdue" }, newValue: { dueDate: today }
+- "push everything back one day" → action: "reschedule", filter: { timeRange: "today" }, newValue: { dueDate: tomorrow }
+- "move all [bucket] tasks to tomorrow" → action: "reschedule", filter: { bucket: "[bucket]" }, newValue: { dueDate: tomorrow }
+- "move everything to Monday" → action: "reschedule", filter: { timeRange: "today" }, newValue: { dueDate: monday }
+- "mark all [bucket] tasks complete" → action: "complete", filter: { bucket: "[bucket]" }, newValue: {}
+- "complete everything in coaching" → action: "complete", filter: { bucket: "Coaching" }, newValue: {}
+- "make everything in work high priority" → action: "priority", filter: { bucket: "Work / Advisory" }, newValue: { priority: "high" }
+- "downgrade everything to normal" → action: "priority", filter: { timeRange: "today" }, newValue: { priority: "normal" }
+- "clear all completed tasks" → action: "archive", filter: { status: "completed" }, newValue: {}
+Use today/tomorrow/monday dates from DATE RESOLUTION table.
+
+MEMORY QUERIES:
+When the user asks about what the system knows, set memoryQuery.
+memoryQuery schema: { "action": "lookup|update|vocabulary", "entityName": "string|null", "newBucket": "string|null" }
+- "what do you know about [person]" / "show me what you know about [name]" → action: "lookup", entityName: "[name]"
+- "change [person] to [bucket]" → action: "update", entityName: "[person]", newBucket: "[bucket]"
+- "show me my vocabulary" / "what's in my vocabulary" → action: "vocabulary"
+
 NAVIGATION & SEARCH:
 Detect navigation and query intents. Set navigationIntent when the user wants to navigate or query.
 - "go to lists" / "open lists" → action: "navigate", target: "lists"
 - "go to tasks" / "back to tasks" → action: "navigate", target: "tasks"
+- "go back" / "close this" / "close the modal" → action: "close-modal"
+- "show me everything" / "show all tasks" / "clear filters" → action: "clear-filters" (clears current bucket/search filter — NOT a modal)
+IMPORTANT: "show me everything" → action: "clear-filters", NOT action: "modal". This is the one exception to the modal rule.
 
 MODAL RULE (ABSOLUTE — NEVER OVERRIDE): Any input containing show me, find, search for, pull up, what do I have, what's left, what's due, look up, display, or any interrogative asking about tasks or lists MUST return navigationIntent with action: "modal" and the appropriate filter. NEVER return navigationIntent with action: "filter" for these queries. The modal is always the answer to any query.
 
@@ -281,6 +324,9 @@ timeRange values:
 - 'next-week': tasks due next week (next Mon through next Sun)
 - 'overdue': tasks past due, active and rolled status
 - 'completed-today': tasks completed today
+- 'today-summary': today's active tasks AND tasks completed today (combined view)
+- 'keeps-rolling': tasks with roll_count >= 3, sorted by roll_count descending
+- 'oldest': all active tasks sorted by createdAt ascending (oldest first)
 - 'monday' through 'sunday': tasks due on THAT SPECIFIC DAY (use the pre-computed date from DATE RESOLUTION)
 
 timeOfDay: only set when user specifies a time or time range. Parse "at 1pm" as { start: "13:00", end: "13:00" }, "between 9am and 12pm" as { start: "09:00", end: "12:00" }.
@@ -300,7 +346,10 @@ Examples:
 - "what did I complete today" → action: "modal", modalType: "tasks", filter: { "timeRange": "completed-today" }, title: "Completed Today"
 - "show me my grocery list" → action: "modal", modalType: "list", filter: { "listName": "grocery" }, title: "Grocery List"
 - "what's left for work" → action: "modal", modalType: "tasks", filter: { "bucket": "Work / Advisory", "timeRange": "today" }, title: "Work Tasks Today"
-- "show me everything" / "show all" → action: "modal", modalType: "tasks", filter: {}, title: "All Tasks"
+- "what keeps rolling?" / "show me what I keep pushing back" → action: "modal", modalType: "tasks", filter: { "timeRange": "keeps-rolling" }, title: "Keeps Rolling"
+- "what's been on my list the longest?" / "show me my oldest tasks" → action: "modal", modalType: "tasks", filter: { "timeRange": "oldest" }, title: "Oldest Tasks"
+- "summarize my day" / "how's my day looking?" → action: "modal", modalType: "tasks", filter: { "timeRange": "today-summary" }, title: "Today's Summary"
+- "how many tasks do I have today?" → action: "modal", modalType: "tasks", filter: { "timeRange": "today" }, title: "Today's Tasks"
 Also still set the legacy "navigation" field for basic "tasks"/"lists" navigation for backward compatibility.
 
 LIST MANAGEMENT — HIGHEST PRIORITY INTENT:
@@ -332,6 +381,10 @@ Actions:
 - DELETE: "delete [list name]" / "remove [list name] list" / "get rid of [list name]" / "delete my [list name] list" / "delete the [list name]" → action: "delete", listName: "list name"
   EXAMPLES: "delete the grocery list" → action: "delete", listName: "grocery" | "get rid of my packing list" → action: "delete", listName: "packing"
 - RECALL: "show me my last [list name]" / "what was on my last grocery list" → action: "recall", listName: "list name"
+- QUERY-ALL: "what lists do I have?" / "show me all my lists" → action: "query-all" (no listName required)
+- QUERY-ARCHIVED: "show me my archived lists" / "what lists have I archived?" → action: "query-archived" (no listName required)
+- RENAME: "rename [list] to [new name]" / "change [list] to [new name]" → action: "rename", listName: "[old name]", newName: "[new name]"
+- COUNT: "how many items are on my [list] list?" → action: "count", listName: "[list]"
 
 Permanent vs Session detection:
 - Permanent: "grocery list", "football gear", "always pack", any recurring list name
@@ -397,7 +450,9 @@ Always respond with valid JSON in this exact structure:
   "navigationIntent": null,
   "listIntent": null,
   "voiceCorrection": null,
-  "vocabularyUpdate": null
+  "vocabularyUpdate": null,
+  "bulkOperation": null,
+  "memoryQuery": null
 }
 
 deleteBucket, when present, should be: { "bucketName": "bucket name", "confirmed": true/false }
@@ -405,15 +460,18 @@ appendToParent, when present, should be: { "parentIdentifier": "partial match of
 navigation, when present, should be: "tasks" or "lists"
 navigationIntent, when present, should be: { "action": "navigate|modal", "target": "tasks|lists" (for navigate), "modalType": "tasks|list" (for modal), "filter": { "bucket": "string|null", "timeRange": "string|null", "timeOfDay": { "start": "HH:MM", "end": "HH:MM" } or null, "priority": "string|null", "searchTerm": "string|null", "listName": "string|null" } (for modal), "title": "string" (for modal) }
 listIntent, when present, should be: { "action": "create|add|check|remove|view|done|archive|delete|recall", "listName": "name of the list", "items": ["items to add"], "markDone": ["items to check"], "removeItems": ["items to remove"], "createType": "permanent|session", "context": "optional context for session lists" }
-voiceCorrection, when present, should be: { "type": "redo|cancel|amend|priority|bucket|reschedule", "targetDescription": "description of what is being corrected", "action": "what to do", "value": "the new value if applicable" }
+voiceCorrection, when present, should be: { "type": "redo|cancel|undo|amend|priority|bucket|reschedule", "targetDescription": "description of what is being corrected", "action": "what to do", "value": "the new value if applicable" }
 vocabularyUpdate, when present, should be: { "term": "the term", "definition": "the definition" }
+bulkOperation, when present, should be: { "action": "reschedule|complete|priority|archive", "filter": { "bucket": "string|null", "timeRange": "string|null", "priority": "string|null", "rollCount": number|null, "status": "string|null" }, "newValue": { "dueDate": "YYYY-MM-DD|null", "priority": "string|null" } }
+memoryQuery, when present, should be: { "action": "lookup|update|vocabulary", "entityName": "string|null", "newBucket": "string|null" }
+listIntent, when present, should be: { "action": "create|add|check|remove|view|done|archive|delete|recall|query-all|query-archived|rename|count", "listName": "name of the list (null for query-all/query-archived)", "newName": "new name for rename action (null otherwise)", "items": ["items to add"], "markDone": ["items to check"], "removeItems": ["items to remove"], "createType": "permanent|session", "context": "optional context for session lists" }
 
-If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, navigation, navigationIntent, listIntent, voiceCorrection, and vocabularyUpdate default to null.
+If a field has no entries, use an empty array []. memoryUpdates, subtaskGroups, and newBuckets can be empty arrays if not applicable. deleteBucket, appendToParent, navigation, navigationIntent, listIntent, voiceCorrection, vocabularyUpdate, bulkOperation, and memoryQuery default to null.
 
 If the user is asking a question (like "what's left?" or "what do I have for work?"), set response to a helpful answer based on their current task list. Still include any task operations in the other fields if applicable.`
 }
 
-export async function parseInput(text, currentTasks, memoryContext) {
+export async function parseInput(text, currentTasks, memoryContext, appState) {
   const taskSummary = currentTasks
     .filter((t) => t.status === 'active')
     .map(
@@ -431,7 +489,7 @@ ${taskSummary || '(none)'}
 
 User input: "${text}"`
 
-  const systemPrompt = buildSystemPrompt(memoryContext, dateContext)
+  const systemPrompt = buildSystemPrompt(memoryContext, dateContext, appState)
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',

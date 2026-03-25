@@ -212,6 +212,23 @@ export async function updateItemCore(itemId, isCore) {
   }
 }
 
+export async function renameList(id, newName) {
+  try {
+    const { data, error } = await supabase
+      .from('lists')
+      .update({ name: newName })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  } catch (err) {
+    console.error('[ListService] renameList failed:', err)
+    return null
+  }
+}
+
 export async function promoteCoreItems(listId) {
   // Promote items that appear on 3+ versions of this list to is_core
   try {

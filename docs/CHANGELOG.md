@@ -162,6 +162,44 @@ Added TASK FORMAT RULE to Claude's system prompt: every task must be formatted a
 
 ---
 
+## 2026-03-25
+
+### Build 4 — Rolling Flags, Bulk Operations, App State Injection, Voice Expansion, Memory Queries, List Management
+
+Nine interconnected features that dramatically expand MarlonOS's contextual intelligence, bulk editing, and coaching capabilities:
+
+**FIX 1 — Roll Count Schema**
+Created `src/lib/build4_schema.sql` adding `roll_count integer DEFAULT 0` column to the tasks table. Refactored `taskService.rolloverTasks()` to fetch affected tasks first, then increment each task's `roll_count` individually before rolling to the next day. Tasks that complete before rolling never have their roll_count incremented.
+
+**FIX 2 — Rolling Task Visual Flag + Nudge Banner**
+`TaskCard` and `ParentTaskCard` in `App.jsx` now render progressive visual treatment based on `roll_count`. roll_count 0–2: normal display. roll_count 3+: amber ⚑ flag + "Rolled Nx" chip in task meta row. roll_count 4–5: task text shifts to amber (#EAB308). roll_count 6+: task text and flag shift to orange (#F97316). At roll_count 4 (and again at 8, 12, …), an inline nudge banner appears below the task card: "This has rolled N days in a row. Schedule it, remove it, or keep it?" with three actions — Schedule (gold, reveals inline date picker), Remove (red, deletes task with toast), Keep (gray, dismisses nudge, re-shows at +4 rolls). Nudge dismissal state stored in localStorage per task ID.
+
+**FIX 3 — App State Injection Into Claude**
+`parseInput()` in `claudeService.js` now accepts a fourth `appState` parameter. `buildSystemPrompt()` injects a `CURRENT APP STATE` block: overdue count, today count, upcoming count, completed today, active filter, current view, and open modal title. In `App.jsx`, an `appStateRef` is created and kept current via `useEffect` whenever task counts or nav state change. Passed to `useTasks(showToast, appStateRef)` and read inside `addFromText` before every Claude call.
+
+**FIX 4 — Bulk Voice Operations**
+`claudeService.js` now returns a `bulkOperation` field for multi-task commands: action (reschedule/complete/priority/archive), filter (bucket/timeRange/priority/rollCount/status), newValue (dueDate/priority). `useTasks.js` processes bulk ops in pure JS: filters tasks array using the filter object, stores snapshots for undo in `lastBulkOpRef`, then calls new batch functions in `taskService.js` (`bulkReschedule`, `bulkComplete`, `bulkUpdatePriority`, `bulkArchive`). All batch operations process in groups of 10. Toast shows "[N] tasks updated". "Undo that" within 30 seconds restores original values via snapshot — `voiceCorrection.type = 'undo'` added alongside existing 'cancel'.
+
+**FIX 5 — Keeps Rolling Modal Query**
+Added `timeRange: 'keeps-rolling'` filter to the modal system in `useTasks.js`. Filters active/rolled tasks with `roll_count >= 3`, sorts by roll_count descending. Claude now recognizes "what keeps rolling?" and "show me what I keep pushing back" → modal with title "Keeps Rolling". Also added `timeRange: 'oldest'` (sort all active tasks by createdAt ascending) and `timeRange: 'today-summary'` (today's active tasks + tasks completed today combined).
+
+**FIX 6 — Memory Query Voice Commands**
+New `memoryQuery` field in Claude response schema. Supported actions: `lookup` (fetch entity from memory table, open SearchModal with entity details — name, type, bucket, confidence, correction count, context, last referenced), `update` (call confirmEntity with new bucket, show toast), `vocabulary` (open SearchModal with all personalVocabulary entries as term → definition list). Two new SearchModal types added: `memory` and `vocabulary`, each with dedicated render sections and CSS.
+
+**FIX 7 — List Management Voice Commands**
+Expanded `listIntent` in Claude with four new actions: `query-all` (show all lists with item counts in modal), `query-archived` (show archived lists in modal), `rename` (listName + newName), `count` (item count toast). New `listService.renameList(id, newName)` function. `useLists.renameList(listId, newName)` with optimistic update. Handlers in `useTasks.js` for all four new actions. New SearchModal type `list-summary` for query-all/query-archived views.
+
+**FIX 8 — Expanded Task Query Commands**
+Claude now recognizes: "summarize my day" → today-summary modal, "what's been on my list the longest?" → oldest modal, "what keeps rolling?" → keeps-rolling modal, "how many tasks do I have today?" → today modal. "go back" / "close this" → `navigationIntent: { action: 'close-modal' }` → closes open modal from main mic. "show me everything" / "clear filters" → `action: 'clear-filters'` → sets activeBucket to ALL_FILTER and clears search (NOT a modal — explicit exception to the modal rule). `close-modal` and `clear-filters` handlers added to `useTasks.js` navigationIntent processing.
+
+**FIX 9 — Task Date Manipulation Voice Command Examples**
+Added explicit reschedule examples to the Voice Correction Protocol in `claudeService.js`: "push [task] back one day" → type: reschedule + targetDescription + tomorrow, "move [task] to [day]" → reschedule with DATE RESOLUTION lookup, "schedule [task] for [day]" → reschedule. "what day is [task] due?" → navigationIntent modal searchTerm query. New `voiceCorrection.type = 'undo'` documented. Three concrete examples provided.
+
+**Files created:** `src/lib/build4_schema.sql`
+**Files modified:** `src/services/taskService.js`, `src/services/listService.js`, `src/services/claudeService.js`, `src/hooks/useTasks.js`, `src/hooks/useLists.js`, `src/components/SearchModal.jsx`, `src/App.jsx`, `src/App.css`, `docs/CHANGELOG.md`, `docs/ARCHITECTURE.md`
+
+---
+
 ## 2026-03-23
 
 ### Fix Batch — Append-to-Task Gate, Memory Fallback, Modal Mic, Delete List, Reformat Tasks, Priority Calibration

@@ -53,6 +53,9 @@ Structured JSON response
 | Responsibility | Owner | Why |
 |---------------|-------|-----|
 | Parse natural language into structured intents | **Claude** | Language is ambiguous; AI excels here |
+| Understand current app context (overdue count, active view) | **JavaScript (appStateRef)** | Injected into prompt as a live state block |
+| Bulk operations filtering | **JavaScript** | Pure array filtering in useTasks, zero extra API calls |
+| Roll count tracking & nudge thresholds | **JavaScript** | Deterministic counting in rolloverTasks + localStorage nudge state |
 | Extract task text, bucket, priority from speech | **Claude** | Requires context understanding |
 | Detect correction intent ("redo that", "cancel") | **Claude** | Natural language pattern matching |
 | Detect list intents (create, add, check, view) | **Claude** | Requires understanding user intent |
@@ -91,6 +94,7 @@ Primary table. Stores all tasks including subtasks (linked via `parent_task_id`)
 | parent_task_id | uuid (FK) | Links subtask to parent |
 | is_parent | boolean | True for parent tasks |
 | subtask_order | integer | Sort order within parent |
+| roll_count | integer | Times task has been rolled over (added build 4) |
 
 ### `transcripts`
 Every voice/text input is logged with its parsed Claude output.
@@ -151,9 +155,9 @@ Individual items within a list.
 
 | Service | File | Responsibility |
 |---------|------|---------------|
-| **claudeService** | `services/claudeService.js` | Builds system prompt with date context, memory, vocabulary, buckets. Sends to Claude, parses JSON response. Single export: `parseInput()`. |
-| **taskService** | `services/taskService.js` | Full CRUD for tasks table. Handles parent/subtask creation, completion (with auto-complete parent), rollover. |
-| **listService** | `services/listService.js` | Full CRUD for lists and list_items. Core item detection, archival, template pre-population, auto-promotion of frequently used items. All functions fail silently. |
+| **claudeService** | `services/claudeService.js` | Builds system prompt with date context, memory, vocabulary, buckets, and live app state. Sends to Claude, parses JSON response. Exports: `parseInput(text, tasks, memory, appState)`, `parseListCommand()`, `getChicagoDateContext()`. |
+| **taskService** | `services/taskService.js` | Full CRUD for tasks table. Handles parent/subtask creation, completion, rollover (with roll_count increment), and bulk operations (bulkReschedule, bulkComplete, bulkUpdatePriority, bulkArchive). |
+| **listService** | `services/listService.js` | Full CRUD for lists and list_items. Core item detection, archival, template pre-population, auto-promotion of frequently used items, rename. All functions fail silently. |
 | **memoryService** | `services/memoryService.js` | Entity CRUD with confidence tier enforcement. Never downgrades CONFIRMED to INFERRED. Tracks last_referenced for recency. |
 | **transcriptService** | `services/transcriptService.js` | Logs every input/output pair. Links task IDs post-creation. Marks corrections. |
 | **whisperService** | `services/whisperService.js` | Sends audio blob to OpenAI Whisper API, returns transcript text. Handles webm/mp4 format detection. |
@@ -162,7 +166,7 @@ Individual items within a list.
 
 | Hook | File | Manages |
 |------|------|---------|
-| **useTasks** | `hooks/useTasks.js` | Central orchestrator. Loads tasks, processes Claude's full JSON response (15+ intent types), manages search modal state, voice corrections, navigation, bucket management, list intent routing. |
+| **useTasks** | `hooks/useTasks.js` | Central orchestrator. Accepts `appStateRef` for live context injection. Loads tasks, processes Claude's full JSON response (20+ intent types including bulkOperation, memoryQuery, close-modal, clear-filters). Manages search modal state, voice corrections (incl. undo-bulk), navigation, bucket management, list intent routing, roll_count modal filters. |
 | **useLists** | `hooks/useLists.js` | Loads all lists with items, sorts permanent-first. Optimistic UI for check/uncheck/delete. Exposes create, check, archive, delete, toggle core. |
 | **useMemory** | `hooks/useMemory.js` | Loads memory entities, exposes confirm/refresh. |
 | **useVoiceRecorder** | `hooks/useVoiceRecorder.js` | MediaRecorder wrapper. Start/stop recording, produces audioBlob. Handles mime type negotiation (webm > mp4 > default). |

@@ -141,6 +141,11 @@ export function useLists() {
     await listService.deleteItem(itemId)
   }, [])
 
+  const renameList = useCallback(async (listId, newName) => {
+    setLists((prev) => prev.map((l) => l.id === listId ? { ...l, name: newName } : l))
+    return await listService.renameList(listId, newName)
+  }, [])
+
   const toggleItemCore = useCallback(async (itemId, listId, isCore) => {
     // Optimistic update
     setLists((prev) =>
@@ -171,6 +176,7 @@ export function useLists() {
     archiveList,
     deleteItem,
     toggleItemCore,
+    renameList,
     refreshLists,
   }
 }

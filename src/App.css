@@ -1509,3 +1509,202 @@ button.section-header:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ══════════════════════════════════════════
+   BUILD 4 — Rolling Flags, Nudge, Memory, Lists
+   ══════════════════════════════════════════ */
+
+/* ── Roll Flag & Counter ── */
+.roll-flag {
+  font-size: 13px;
+  margin-right: 2px;
+}
+
+.roll-counter {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(234, 179, 8, 0.1);
+}
+
+/* ── Roll Nudge Banner ── */
+.roll-nudge {
+  margin: 0 0 0 34px;  /* align with task text, indent past checkbox */
+  padding: 10px 14px;
+  background: rgba(234, 179, 8, 0.07);
+  border-left: 3px solid #EAB308;
+  border-bottom: 1px solid var(--border);
+}
+
+.roll-nudge-message {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.roll-nudge-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.roll-nudge-schedule {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.roll-nudge-btn-gold {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(201, 168, 76, 0.15);
+  color: #c9a84c;
+  border: 1px solid rgba(201, 168, 76, 0.3);
+}
+
+.roll-nudge-btn-red {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(220, 38, 38, 0.1);
+  color: #DC2626;
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+
+.roll-nudge-btn-gray {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.roll-nudge-btn-gold:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.roll-nudge-date-input {
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+}
+
+/* ── Memory Entity Card (modal) ── */
+.memory-detail-view {
+  padding: 4px 0;
+}
+
+.memory-entity-card {
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-entity-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.memory-entity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.memory-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  width: 80px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.memory-confidence.confirmed {
+  color: #22C55E;
+}
+
+.memory-confidence.inferred {
+  color: #EAB308;
+}
+
+/* ── Vocabulary View (modal) ── */
+.vocab-view {
+  padding: 8px 0;
+}
+
+.vocab-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 1.4;
+  flex-wrap: wrap;
+}
+
+.vocab-term {
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.vocab-sep {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.vocab-def {
+  color: var(--text);
+}
+
+/* ── List Summary View (modal) ── */
+.list-summary-view {
+  padding: 4px 0;
+}
+
+.list-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.list-summary-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.list-summary-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.list-summary-archived {
+  color: #6B7280;
+  font-style: italic;
+}

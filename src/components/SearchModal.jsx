@@ -240,6 +240,9 @@ export default function SearchModal({
   if (!modal.isOpen) return null
 
   const isListView = modal.type === 'list'
+  const isMemoryView = modal.type === 'memory'
+  const isVocabView = modal.type === 'vocabulary'
+  const isListSummaryView = modal.type === 'list-summary'
   const items = modal.data || []
   const hasNoResults = items.length === 0
 
@@ -446,6 +449,66 @@ export default function SearchModal({
                 </form>
               )}
             </>
+          ) : isMemoryView ? (
+            /* Memory entity details */
+            <div className="memory-detail-view">
+              {hasNoResults ? (
+                <div className="no-results-message">
+                  {modal.query ? `No memory record for "${modal.query}"` : 'No memory record found'}
+                </div>
+              ) : (
+                items.map((entity) => (
+                  <div key={entity.id || entity.entity_name} className="memory-entity-card">
+                    <div className="memory-entity-name">{entity.entity_name}</div>
+                    <div className="memory-entity-row"><span className="memory-label">Type</span><span>{entity.entity_type}</span></div>
+                    <div className="memory-entity-row"><span className="memory-label">Bucket</span><span>{entity.default_bucket}</span></div>
+                    <div className="memory-entity-row"><span className="memory-label">Confidence</span><span className={`memory-confidence ${entity.confidence?.toLowerCase()}`}>{entity.confidence}</span></div>
+                    {entity.correction_count > 0 && (
+                      <div className="memory-entity-row"><span className="memory-label">Corrections</span><span>{entity.correction_count}</span></div>
+                    )}
+                    {entity.context && (
+                      <div className="memory-entity-row"><span className="memory-label">Context</span><span>{entity.context}</span></div>
+                    )}
+                    {entity.last_referenced && (
+                      <div className="memory-entity-row"><span className="memory-label">Last seen</span><span>{new Date(entity.last_referenced).toLocaleDateString()}</span></div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : isVocabView ? (
+            /* Personal vocabulary list */
+            <div className="vocab-view">
+              {hasNoResults ? (
+                <div className="no-results-message">No vocabulary terms yet</div>
+              ) : (
+                items.map((entry, i) => (
+                  <div key={entry.term || i} className="vocab-entry">
+                    <span className="vocab-term">{entry.term}</span>
+                    <span className="vocab-sep">→</span>
+                    <span className="vocab-def">{entry.definition}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : isListSummaryView ? (
+            /* List summary (query-all, query-archived) */
+            <div className="list-summary-view">
+              {hasNoResults ? (
+                <div className="no-results-message">No lists found</div>
+              ) : (
+                items.map((list) => (
+                  <div key={list.id} className="list-summary-row">
+                    <span className="list-summary-name">{list.name}</span>
+                    <span className="list-summary-meta">
+                      {list.itemCount} item{list.itemCount !== 1 ? 's' : ''}
+                      {list.checkedCount > 0 && ` · ${list.checkedCount} done`}
+                      {list.isArchived && <span className="list-summary-archived"> · archived</span>}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           ) : (
             /* Task search results */
             <>
@@ -509,7 +572,7 @@ export default function SearchModal({
         </div>
 
         <div className="search-modal-footer">
-          {!isListView && (
+          {!isListView && !isMemoryView && !isVocabView && !isListSummaryView && (
             <button
               type="button"
               className={`mic-btn modal-mic-btn ${isRecording ? 'recording' : ''}`}

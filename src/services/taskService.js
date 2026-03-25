@@ -135,18 +135,80 @@ export async function convertToParent(id) {
 
 export async function rolloverTasks() {
   const today = new Date().toISOString().split('T')[0]
-  const { data, error } = await supabase
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+
+  // Step 1: fetch tasks that need rolling so we can increment each roll_count
+  const { data: toRoll, error: fetchError } = await supabase
     .from('tasks')
-    .update({
-      status: 'rolled',
-      dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-      mustDoToday: false,
-    })
+    .select('id, roll_count')
     .eq('status', 'active')
     .eq('dueDate', today)
     .lt('createdAt', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
-    .select()
 
-  if (error) throw error
-  return data
+  if (fetchError) throw fetchError
+  if (!toRoll || toRoll.length === 0) return []
+
+  const results = []
+  for (const task of toRoll) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        status: 'rolled',
+        dueDate: tomorrow,
+        mustDoToday: false,
+        roll_count: (task.roll_count || 0) + 1,
+      })
+      .eq('id', task.id)
+      .select()
+      .single()
+
+    if (!error && data) results.push(data)
+  }
+  return results
+}
+
+// --- Bulk operations (batched to avoid overwhelming Supabase) ---
+
+export async function bulkReschedule(taskIds, newDueDate) {
+  for (let i = 0; i < taskIds.length; i += 10) {
+    const batch = taskIds.slice(i, i + 10)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ dueDate: newDueDate, status: 'active', mustDoToday: false })
+      .in('id', batch)
+    if (error) throw error
+  }
+}
+
+export async function bulkComplete(taskIds) {
+  for (let i = 0; i < taskIds.length; i += 10) {
+    const batch = taskIds.slice(i, i + 10)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ status: 'completed', completedAt: new Date().toISOString() })
+      .in('id', batch)
+    if (error) throw error
+  }
+}
+
+export async function bulkUpdatePriority(taskIds, priority) {
+  for (let i = 0; i < taskIds.length; i += 10) {
+    const batch = taskIds.slice(i, i + 10)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ priority })
+      .in('id', batch)
+    if (error) throw error
+  }
+}
+
+export async function bulkArchive(taskIds) {
+  for (let i = 0; i < taskIds.length; i += 10) {
+    const batch = taskIds.slice(i, i + 10)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ archivedAt: new Date().toISOString() })
+      .in('id', batch)
+    if (error) throw error
+  }
 }
